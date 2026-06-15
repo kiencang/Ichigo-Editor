@@ -1,0 +1,6 @@
+{
+  "name": "Ichigo Editor",
+  "description": "A lightweight client-side video editor using FFmpeg to trim, add audio/logo, adjust volume, and convert formats.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

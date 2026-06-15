@@ -1,0 +1,375 @@
+<div class="min-h-screen bg-neutral-900 text-neutral-100 font-sans selection:bg-red-500/30 flex flex-col">
+  <!-- Header -->
+  <header class="border-b border-white/10 bg-neutral-950 px-8 py-4 flex items-center justify-between sticky top-0 z-50">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 rounded-lg bg-red-500/20 text-red-500 flex items-center justify-center">
+        <mat-icon class="text-xl">movie_edit</mat-icon>
+      </div>
+      <h1 class="text-xl font-medium tracking-tight">Ichigo Editor</h1>
+    </div>
+
+    <!-- Language Selector Toggle -->
+    <div class="flex items-center gap-1 bg-neutral-900 border border-white/5 p-1 rounded-xl">
+      <button 
+        (click)="setLang('vi')" 
+        class="px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer"
+        [class.bg-red-500]="lang() === 'vi'"
+        [class.text-white]="lang() === 'vi'"
+        [class.text-neutral-400]="lang() !== 'vi'"
+        [class.hover:text-neutral-100]="lang() !== 'vi'">
+        Tiếng Việt
+      </button>
+      <button 
+        (click)="setLang('en')" 
+        class="px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer"
+        [class.bg-red-500]="lang() === 'en'"
+        [class.text-white]="lang() === 'en'"
+        [class.text-neutral-400]="lang() !== 'en'"
+        [class.hover:text-neutral-100]="lang() !== 'en'">
+        English
+      </button>
+    </div>
+  </header>
+
+  <main class="flex-1 max-w-[1440px] w-full mx-auto px-8 py-6"
+        [class.grid]="videoFile()"
+        [class.grid-cols-1]="videoFile()"
+        [class.lg:grid-cols-12]="videoFile()"
+        [class.gap-8]="videoFile()"
+        [class.flex]="!videoFile()"
+        [class.flex-col]="!videoFile()"
+        [class.justify-center]="!videoFile()">
+    
+    <!-- Error Message Alert -->
+    @if (errorMessage()) {
+      <div class="col-span-full p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-200 flex items-start justify-between gap-3 animate-fade-in">
+        <div class="flex items-start gap-3">
+          <mat-icon class="text-red-400 shrink-0">error</mat-icon>
+          <div class="text-sm font-medium">
+            {{ errorMessage() }}
+          </div>
+        </div>
+        <button (click)="errorMessage.set(null)" class="text-neutral-400 hover:text-white transition-colors cursor-pointer">
+          <mat-icon class="text-base">close</mat-icon>
+        </button>
+      </div>
+    }
+    
+    <!-- Upload Screen (If no video) -->
+    @if (!videoFile()) {
+      <div class="col-span-full h-[60vh] flex flex-col items-center justify-center border-2 border-dashed border-white/10 rounded-2xl bg-neutral-900/50 hover:bg-neutral-800/50 hover:border-red-500/50 transition-all">
+        <div class="w-16 h-16 rounded-full bg-red-500/10 text-red-500 flex items-center justify-center mb-6">
+          <mat-icon class="text-3xl">upload_file</mat-icon>
+        </div>
+        <h2 class="text-2xl font-medium mb-2 tracking-tight">{{ translations().selectVideo }}</h2>
+        <p class="text-neutral-500 mb-8 max-w-md text-center">{{ translations().processDevice }}</p>
+        <label for="video-upload" class="px-6 py-3 bg-red-500 hover:bg-red-600 text-white font-medium rounded-xl cursor-pointer transition-colors flex items-center gap-2 shadow-sm">
+          <mat-icon>folder_open</mat-icon>
+          {{ translations().browseFiles }}
+        </label>
+        <input id="video-upload" type="file" accept="video/*" class="hidden" (change)="onVideoSelected($event)">
+      </div>
+    } @else {
+      <!-- Video Preview and Annotations -->
+      <div class="col-span-1 lg:col-span-9 flex flex-col gap-6">
+        
+        <div class="bg-black rounded-2xl overflow-hidden relative shadow-md ring-1 ring-white/10 flex items-center justify-center min-h-[300px]">
+          <!-- Video element -->
+          <video 
+            #videoEl
+            [src]="videoUrl()"
+            crossorigin="anonymous"
+            class="max-w-full max-h-[60vh] object-contain block"
+            (loadedmetadata)="onVideoLoadedMetadata($event)"
+            (timeupdate)="onTimeUpdate()"
+            (play)="isPlaying.set(true)"
+            (pause)="isPlaying.set(false)"
+            (seeking)="onTimeUpdate()"
+            (seeked)="onTimeUpdate()">
+          </video>
+          
+          <!-- Drawing Canvas overlaid exactly on top of video -->
+          <!-- We place it absolute, inset-0 to cover the container, but we need it to exactly match the video sizing. -->
+          <!-- Using inline width/height 100% and object-fit to match the video bounding box -->
+          <canvas
+            #canvasEl
+            class="absolute top-0 left-0 w-full h-full object-contain cursor-crosshair z-10 touch-none pointer-events-auto"
+            [class.pointer-events-none]="currentTool() === 'pointer'"
+            (mousedown)="onPointerDown($event)"
+            (mousemove)="onPointerMove($event)"
+            (mouseup)="onPointerUp()"
+            (mouseleave)="onPointerUp()"
+            (touchstart)="onPointerDown($event)"
+            (touchmove)="onPointerMove($event)"
+            (touchend)="onPointerUp()">
+          </canvas>
+        </div>
+
+        <!-- Modern Custom Video Player Control & Timeline Dock -->
+        <div class="bg-neutral-950/70 border border-white/5 rounded-2xl p-5 flex flex-col gap-4 shadow-sm"
+             (window:mousemove)="onGlobalMove($event)"
+             (window:mouseup)="onGlobalUp()"
+             (window:touchmove)="onGlobalMove($event)"
+             (window:touchend)="onGlobalUp()">
+          
+          <!-- Top Row: Master playhead state & Quick Action Buttons -->
+          <div class="flex flex-wrap items-center justify-between gap-4">
+            
+            <!-- Left: Play/Pause and Time Status -->
+            <div class="flex items-center gap-3">
+              <button (click)="togglePlay()"
+                class="w-10 h-10 rounded-full flex items-center justify-center bg-red-500 hover:bg-red-600 text-white transition-all shadow-md focus:outline-none focus:ring-2 focus:ring-red-500/30 cursor-pointer">
+                <mat-icon>{{ isPlaying() ? 'pause' : 'play_arrow' }}</mat-icon>
+              </button>
+              
+              <div class="font-mono text-sm text-neutral-300 flex items-center leading-none">
+                <span class="text-white">{{ formatTime(currentTime()) }}</span>
+                <span class="text-neutral-600 px-1.5">/</span>
+                <span class="text-neutral-400">{{ formatTime(videoDuration()) }}</span>
+              </div>
+            </div>
+
+            <!-- Right: Selection and Export stats -->
+            <div class="flex flex-wrap items-center gap-3">
+              <div class="flex items-center h-8 gap-1.5 bg-neutral-900 px-3 rounded-xl border border-white/5 text-xs text-neutral-300">
+                <span class="text-neutral-500 leading-none">{{ translations().selection }}</span>
+                <span class="text-red-400 font-mono font-semibold leading-none">{{ formatTimeShort(trimStart()) }} – {{ formatTimeShort(trimEnd()) }}</span>
+              </div>
+              <div class="flex items-center h-8 gap-1.5 bg-red-500/10 text-red-400 px-3 rounded-xl border border-red-500/10 text-xs font-semibold">
+                <mat-icon class="text-red-400 !flex !items-center !justify-center !leading-none" style="font-size: 14px; width: 14px; height: 14px;">timer</mat-icon>
+                <span class="leading-none">{{ translations().exportLength }}</span>
+                <span class="font-mono font-bold leading-none">{{ formatTimeShort(trimmedDuration()) }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Interactive Timeline Track Area with Ruler -->
+          <div class="flex flex-col gap-1 select-none">
+            
+            <div #timelineContainer class="relative h-12 bg-neutral-900 border border-white/5 rounded-xl cursor-ew-resize overflow-visible"
+                 (mousedown)="onTimelineMouseDown($event, 'track')"
+                 (touchstart)="onTimelineTouchStart($event, 'track')">
+              
+              <!-- Inactive/Trimmed Out start area (grayed out) -->
+              <div class="absolute top-0 bottom-0 left-0 bg-neutral-950/80 border-r border-white/5"
+                   [style.width.%]="(trimStart() / videoDuration()) * 100">
+              </div>
+
+              <!-- Active (Trimmed in) Highlighted Zone -->
+              <div class="absolute top-0 bottom-0 bg-red-500/10 border-y border-red-500/30"
+                   [style.left.%]="(trimStart() / videoDuration()) * 100"
+                   [style.width.%]="((trimEnd() - trimStart()) / videoDuration()) * 100">
+              </div>
+
+              <!-- Inactive/Trimmed Out end area (grayed out) -->
+              <div class="absolute top-0 bottom-0 right-0 bg-neutral-950/80 border-l border-white/5"
+                   [style.left.%]="(trimEnd() / videoDuration()) * 100"
+                   [style.right.%]="0">
+              </div>
+
+              <!-- Ruler Ticks lines in background -->
+              <div class="absolute inset-0 pointer-events-none opacity-20">
+                @for (tick of rulerTicks(); track tick.time) {
+                  <div class="absolute top-0 bottom-0 w-[1px] bg-neutral-500 flex flex-col justify-end"
+                       [style.left.%]="tick.percent">
+                    <!-- tick mark block -->
+                    <span class="h-2 w-[1px] bg-neutral-400"></span>
+                  </div>
+                }
+              </div>
+
+              <!-- CURRENT PLAYHEAD (Yellow or white neon line) -->
+              <div class="absolute top-0 bottom-0 w-[2px] bg-yellow-400 z-30 pointer-events-none shadow-[0_0_8px_rgba(250,204,21,0.6)]"
+                   [style.left.%]="(currentTime() / videoDuration()) * 100">
+                <!-- Playhead top indicator pin -->
+                <div class="absolute -top-1 left-1/2 -translate-x-1/2 w-3 h-3 bg-yellow-400 rotate-45 rounded-sm"></div>
+              </div>
+
+              <!-- Left Trimmer Handle (Starts at trimStart) -->
+              <div class="absolute top-0 bottom-0 w-5 -ml-2.5 z-40 flex items-center justify-center cursor-ew-resize group pointer-events-auto"
+                   [style.left.%]="(trimStart() / videoDuration()) * 100"
+                   (mousedown)="onTimelineMouseDown($event, 'start')"
+                   (touchstart)="onTimelineTouchStart($event, 'start')">
+                <div class="h-full w-2.5 bg-red-500 rounded-l-md border border-neutral-950 shadow-md flex flex-col items-center justify-center gap-0.5 group-hover:bg-red-400 transition-colors">
+                  <div class="w-[1px] h-3 bg-white/70"></div>
+                </div>
+                <!-- Tooltip showing start time -->
+                <div class="absolute -top-8 px-1.5 py-0.5 bg-red-500 text-neutral-100 text-[10px] rounded font-mono font-medium opacity-0 group-hover:opacity-100 pointer-events-none shadow-md transition-opacity">
+                  {{ formatTimeShort(trimStart()) }}
+                </div>
+              </div>
+
+              <!-- Right Trimmer Handle (Ends at trimEnd) -->
+              <div class="absolute top-0 bottom-0 w-5 -ml-2.5 z-40 flex items-center justify-center cursor-ew-resize group pointer-events-auto"
+                   [style.left.%]="(trimEnd() / videoDuration()) * 100"
+                   (mousedown)="onTimelineMouseDown($event, 'end')"
+                   (touchstart)="onTimelineTouchStart($event, 'end')">
+                <div class="h-full w-2.5 bg-red-500 rounded-r-md border border-neutral-950 shadow-md flex flex-col items-center justify-center gap-0.5 group-hover:bg-red-400 transition-colors">
+                  <div class="w-[1px] h-3 bg-white/70"></div>
+                </div>
+                <!-- Tooltip showing end time -->
+                <div class="absolute -top-8 px-1.5 py-0.5 bg-red-500 text-neutral-100 text-[10px] rounded font-mono font-medium opacity-0 group-hover:opacity-100 pointer-events-none shadow-md transition-opacity">
+                  {{ formatTimeShort(trimEnd()) }}
+                </div>
+              </div>
+
+            </div>
+
+            <!-- Ticks Rulers Timestamps Labels below track -->
+            <div class="relative h-6 mt-1 pointer-events-none overflow-hidden text-[9px] font-mono text-neutral-500 select-none">
+              @for (tick of rulerTicks(); track tick.time) {
+                <div class="absolute -translate-x-1/2" [style.left.%]="tick.percent">
+                  {{ formatTimeShort(tick.time) }}
+                </div>
+              }
+            </div>
+
+
+
+          </div>
+
+        </div>
+
+        <!-- Annotation Tools -->
+        <div class="p-4 rounded-2xl bg-neutral-900 border border-white/5 flex flex-wrap items-center gap-4">
+            <span class="text-sm font-medium text-neutral-400">{{ translations().annotationsLabel }}</span>
+            <div class="flex items-center gap-1 bg-neutral-950 p-1 rounded-xl border border-white/5">
+              <button 
+                class="p-2 rounded-lg flex items-center justify-center transition-colors hover:text-white cursor-pointer"
+                [class.bg-neutral-800]="currentTool() === 'pointer'"
+                [class.text-white]="currentTool() === 'pointer'"
+                [class.text-neutral-500]="currentTool() !== 'pointer'"
+                (click)="currentTool.set('pointer')"
+                [attr.title]="translations().toolPointer">
+                <mat-icon size="sm">ads_click</mat-icon>
+              </button>
+              <button 
+                class="p-2 rounded-lg flex items-center justify-center transition-colors hover:text-white cursor-pointer"
+                [class.bg-red-500]="currentTool() === 'pen'"
+                [class.bg-opacity-20]="currentTool() === 'pen'"
+                [class.text-red-400]="currentTool() === 'pen'"
+                [class.text-neutral-500]="currentTool() !== 'pen'"
+                (click)="currentTool.set('pen')"
+                [attr.title]="translations().toolPen">
+                <mat-icon size="sm">draw</mat-icon>
+              </button>
+              <button 
+                class="p-2 rounded-lg flex items-center justify-center transition-colors hover:text-white cursor-pointer"
+                [class.bg-red-500]="currentTool() === 'arrow'"
+                [class.bg-opacity-20]="currentTool() === 'arrow'"
+                [class.text-red-400]="currentTool() === 'arrow'"
+                [class.text-neutral-500]="currentTool() !== 'arrow'"
+                (click)="currentTool.set('arrow')"
+                [attr.title]="translations().toolArrow">
+                <mat-icon size="sm">moving</mat-icon>
+              </button>
+            </div>
+
+            <div class="flex items-center gap-2 ml-auto">
+                <input type="color" [ngModel]="color()" (ngModelChange)="color.set($event)" class="w-8 h-8 rounded cursor-pointer bg-transparent border-0 p-0">
+                <button (click)="clearCanvas()" class="px-3 py-1.5 text-sm font-medium text-neutral-400 hover:text-white hover:bg-white/5 rounded-lg transition-colors cursor-pointer">
+                  {{ translations().clear }}
+                </button>
+            </div>
+        </div>
+      </div>
+
+      <!-- Settings Sidebar -->
+      <div class="col-span-1 lg:col-span-3 flex flex-col gap-6">
+        
+        <div class="p-5 rounded-2xl bg-neutral-900 border border-white/5 flex flex-col gap-6">
+          <h3 class="text-lg font-medium flex items-center gap-2">
+            <mat-icon class="text-red-500">tune</mat-icon> 
+            {{ translations().editorSettings }}
+          </h3>
+
+          <!-- Extra Assets -->
+          <div class="flex flex-col gap-3">
+             <span class="text-sm font-medium text-neutral-400">{{ translations().overlaysAudio }}</span>
+             <label for="audio-upload" class="flex items-center gap-3 p-3 rounded-xl border border-white/5 hover:border-white/20 bg-neutral-950/50 cursor-pointer transition-colors group">
+                <mat-icon class="text-neutral-500 group-hover:text-red-400 transition-colors">audio_file</mat-icon>
+                <div class="flex-1 overflow-hidden">
+                  <div class="text-sm font-medium truncate">{{ audioFile() ? audioFile()!.name : translations().addBgAudio }}</div>
+                </div>
+             </label>
+             <input id="audio-upload" type="file" accept="audio/*" class="hidden" (change)="onAudioSelected($event)">
+             <label for="logo-upload" class="flex items-center gap-3 p-3 rounded-xl border border-white/5 hover:border-white/20 bg-neutral-950/50 cursor-pointer transition-colors group">
+                <mat-icon class="text-neutral-500 group-hover:text-red-400 transition-colors">image</mat-icon>
+                <div class="flex-1 overflow-hidden">
+                  <div class="text-sm font-medium truncate">{{ logoFile() ? logoFile()!.name : translations().addWatermark }}</div>
+                </div>
+             </label>
+             <input id="logo-upload" type="file" accept="image/*" class="hidden" (change)="onLogoSelected($event)">
+          </div>
+
+          <!-- Volume -->
+          <div class="flex flex-col gap-2">
+             <div class="flex justify-between items-center">
+                <span class="text-sm font-medium text-neutral-400">{{ translations().videoVolume }}</span>
+                <span class="text-xs text-neutral-500">{{ volume() }}%</span>
+             </div>
+             <input type="range" [ngModel]="volume()" (ngModelChange)="volume.set($event)" min="0" max="200"
+                class="w-full h-2 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-red-500">
+          </div>
+          
+          <!-- Format -->
+          <div class="flex flex-col gap-2">
+             <span class="text-sm font-medium text-neutral-400">{{ translations().outputFormat }}</span>
+             <select [ngModel]="outputFormat()" (ngModelChange)="outputFormat.set($event)"
+                class="w-full bg-neutral-950 border border-white/10 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-red-500/50 appearance-none cursor-pointer">
+               <option value="mp4">MP4 (.mp4)</option>
+               <option value="webm">WebM (.webm)</option>
+               <option value="gif" [disabled]="isGifDisabled()">GIF (.gif){{ isGifDisabled() ? translations().gifLimit : '' }}</option>
+             </select>
+          </div>
+
+        </div>
+
+        <button 
+          (click)="exportVideo()" 
+          [disabled]="!isLoaded() || isProcessing()"
+          class="w-full py-4 bg-red-500 hover:bg-red-600 disabled:bg-neutral-800 disabled:text-neutral-500 disabled:cursor-not-allowed text-white font-medium rounded-2xl transition-colors flex items-center justify-center gap-2 shadow-sm font-sans tracking-wide cursor-pointer">
+          @if (isProcessing()) {
+            <mat-icon class="animate-spin">data_usage</mat-icon>
+            {{ translations().rendering }} {{ progress() }}%
+          } @else {
+            <mat-icon>movie_filter</mat-icon>
+            {{ translations().exportVideo }}
+          }
+        </button>
+        
+        <!-- Output Box -->
+        @if (outputUrl()) {
+          <div class="p-5 rounded-2xl bg-emerald-950/20 border border-emerald-500/20 flex flex-col gap-4">
+            <h3 class="text-emerald-500 text-sm font-medium flex items-center gap-2">
+              <mat-icon size="sm">check_circle</mat-icon> {{ translations().exportComplete }}
+            </h3>
+            <a [href]="outputUrl()" download class="w-full py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 font-medium rounded-xl text-center transition-colors text-sm border border-emerald-500/20 cursor-pointer">
+              {{ translations().downloadOutput }}
+            </a>
+          </div>
+        }
+
+      </div>
+    }
+      
+  </main>
+
+  <!-- Footer -->
+  <footer class="mt-auto border-t border-white/5 py-4 px-8 bg-neutral-950/40">
+    <div class="max-w-[1440px] mx-auto flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-neutral-500">
+      <div class="flex items-center gap-1.5">
+        <span class="font-medium text-neutral-300">Ichigo Editor</span>
+        <span class="text-neutral-700">•</span>
+        <span>v1.0.0</span>
+      </div>
+      <div class="flex flex-wrap justify-center items-center gap-1.5 font-sans">
+        <a href="https://github.com" target="_blank" rel="noopener noreferrer" class="hover:text-neutral-300 transition-colors cursor-pointer">GitHub</a>
+        <span class="text-neutral-700">•</span>
+        <span class="text-neutral-400">Nguyễn Đức Anh</span>
+        <span class="text-neutral-700">•</span>
+        <a href="mailto:contact@wpsila.com" class="hover:text-neutral-300 transition-colors cursor-pointer">contact@wpsila.com</a>
+      </div>
+    </div>
+  </footer>
+</div>
