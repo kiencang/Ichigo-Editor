@@ -103,6 +103,22 @@
             (touchmove)="onPointerMove($event)"
             (touchend)="onPointerUp()">
           </canvas>
+          
+          <!-- Watermark Live Preview Overlay -->
+          @if (logoPreviewUrl()) {
+            <div class="absolute inset-x-4 inset-y-4 z-15 pointer-events-none overflow-hidden select-none flex"
+                 [class.justify-start]="logoPosition() === 'top-left' || logoPosition() === 'bottom-left'"
+                 [class.justify-end]="logoPosition() === 'top-right' || logoPosition() === 'bottom-right'"
+                 [class.items-start]="logoPosition() === 'top-left' || logoPosition() === 'top-right'"
+                 [class.items-end]="logoPosition() === 'bottom-left' || logoPosition() === 'bottom-right'">
+              <img [src]="logoPreviewUrl()" 
+                   alt="Watermark Preview"
+                   [style.opacity]="logoOpacity() / 100"
+                   [style.width.%]="logoSize()"
+                   class="max-w-[30%] h-auto border border-white/5 shadow-sm rounded-lg"
+                   referrerpolicy="no-referrer">
+            </div>
+          }
         </div>
 
         <!-- Modern Custom Video Player Control & Timeline Dock -->
@@ -146,10 +162,31 @@
           <!-- Interactive Timeline Track Area with Ruler -->
           <div class="flex flex-col gap-1 select-none">
             
-            <div #timelineContainer class="relative h-12 bg-neutral-900 border border-white/5 rounded-xl cursor-ew-resize overflow-visible"
+            <div #timelineContainer class="relative h-16 bg-neutral-900 border border-white/5 rounded-xl cursor-ew-resize overflow-visible"
                  (mousedown)="onTimelineMouseDown($event, 'track')"
                  (touchstart)="onTimelineTouchStart($event, 'track')">
               
+              <!-- Waveform Bars Background -->
+              <div class="absolute inset-0 flex items-center justify-between px-2 gap-[1px] pointer-events-none">
+                @for (amp of waveform(); track $index) {
+                  <div [style.height.%]="amp * 100" 
+                       class="flex-1 min-w-[1px] max-w-[3px] rounded-full transition-all duration-300"
+                       [class.bg-neutral-500/70]="!isBarSelected($index)"
+                       [class.bg-red-500]="isBarSelected($index)">
+                  </div>
+                }
+              </div>
+
+              <!-- Loading Indicator Overlay for Waveform -->
+              @if (isExtractingWaveform()) {
+                <div class="absolute inset-0 flex items-center justify-center bg-neutral-950/80 z-25 rounded-xl pointer-events-none">
+                  <div class="flex items-center gap-2 text-xs text-neutral-350">
+                    <mat-icon class="animate-spin text-base !flex !items-center !justify-center !leading-none" style="font-size: 16px; width: 16px; height: 16px;">pending</mat-icon>
+                    <span class="font-sans font-medium text-neutral-400 select-none">{{ lang() === 'vi' ? 'Đang phân tích dạng sóng âm...' : 'Analyzing audio waveform...' }}</span>
+                  </div>
+                </div>
+              }
+
               <!-- Inactive/Trimmed Out start area (grayed out) -->
               <div class="absolute top-0 bottom-0 left-0 bg-neutral-950/80 border-r border-white/5"
                    [style.width.%]="(trimStart() / videoDuration()) * 100">
@@ -214,6 +251,56 @@
               </div>
 
             </div>
+
+            <!-- Background Music Timeline Row -->
+            @if (audioFile()) {
+              <div class="relative h-10 bg-neutral-900/60 border border-white/5 rounded-xl overflow-hidden mt-1 flex items-center">
+                
+                <!-- Background Waveform bars -->
+                <div class="absolute inset-0 flex items-center justify-between px-2 gap-[1px] pointer-events-none">
+                  @for (amp of bgWaveform(); track $index) {
+                    <div [style.height.%]="amp * 100" 
+                         class="flex-1 min-w-[1px] max-w-[3px] rounded-full transition-all duration-300"
+                         [class.bg-neutral-500/30]="!isBarSelected($index)"
+                         [class.bg-emerald-500/80]="isBarSelected($index)">
+                    </div>
+                  }
+                </div>
+
+                <!-- Green Highlighted Trim Range on Bg Audio Waveform as well to show alignment -->
+                <div class="absolute top-0 bottom-0 bg-emerald-500/5 border-y border-emerald-500/20"
+                     [style.left.%]="(trimStart() / videoDuration()) * 100"
+                     [style.width.%]="((trimEnd() - trimStart()) / videoDuration()) * 100">
+                </div>
+
+                <!-- Label & Inline interactive volume slider -->
+                <div class="absolute inset-y-0 left-3 flex items-center gap-2 pointer-events-auto z-10">
+                  <div class="flex items-center gap-1 px-2 py-1 rounded-lg bg-neutral-950/85 border border-white/5 shadow-md text-[10px] font-medium text-emerald-400">
+                    <mat-icon class="text-[12px] !flex !items-center !justify-center !leading-none" style="font-size: 12px; width: 12px; height: 12px;">music_note</mat-icon>
+                    <span>{{ translations().bgAudioTrack }}</span>
+                  </div>
+                  
+                  <!-- Volume Slider right next to tag -->
+                  <div class="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-neutral-950/85 border border-white/5 shadow-md">
+                    <mat-icon class="text-[12px] text-neutral-400" style="font-size: 12px; width: 12px; height: 12px;">volume_down</mat-icon>
+                    <input type="range" [ngModel]="bgVolume()" (ngModelChange)="setBgVolume($event)" min="0" max="100"
+                           class="w-16 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                           title="Volume music">
+                    <span class="text-[9px] font-mono text-neutral-400 w-6 text-right">{{ bgVolume() }}%</span>
+                  </div>
+                </div>
+
+                <!-- Loading Indicator Overlay for BG Waveform -->
+                @if (isExtractingBgWaveform()) {
+                  <div class="absolute inset-0 flex items-center justify-center bg-neutral-950/85 z-20">
+                    <div class="flex items-center gap-2 text-[11px] text-neutral-350">
+                      <mat-icon class="animate-spin text-sm" style="font-size: 14px; width: 14px; height: 14px;">pending</mat-icon>
+                      <span class="font-sans font-medium text-neutral-400">{{ translations().extractingBgWaveform }}</span>
+                    </div>
+                  </div>
+                }
+              </div>
+            }
 
             <!-- Ticks Rulers Timestamps Labels below track -->
             <div class="relative h-6 mt-1 pointer-events-none overflow-hidden text-[9px] font-mono text-neutral-500 select-none">
@@ -286,30 +373,131 @@
           <!-- Extra Assets -->
           <div class="flex flex-col gap-3">
              <span class="text-sm font-medium text-neutral-400">{{ translations().overlaysAudio }}</span>
-             <label for="audio-upload" class="flex items-center gap-3 p-3 rounded-xl border border-white/5 hover:border-white/20 bg-neutral-950/50 cursor-pointer transition-colors group">
-                <mat-icon class="text-neutral-500 group-hover:text-red-400 transition-colors">audio_file</mat-icon>
-                <div class="flex-1 overflow-hidden">
-                  <div class="text-sm font-medium truncate">{{ audioFile() ? audioFile()!.name : translations().addBgAudio }}</div>
-                </div>
-             </label>
+             <div class="flex items-center gap-2">
+               <label for="audio-upload" class="flex-1 flex items-center gap-3 p-3 rounded-xl border border-white/5 hover:border-white/20 bg-neutral-950/50 cursor-pointer transition-colors group">
+                  <mat-icon class="text-neutral-500 group-hover:text-red-400 transition-colors">audio_file</mat-icon>
+                  <div class="flex-1 overflow-hidden">
+                    <div class="text-sm font-medium truncate">{{ audioFile() ? audioFile()!.name : translations().addBgAudio }}</div>
+                  </div>
+               </label>
+               @if (audioFile()) {
+                 <button (click)="removeBgAudio()" class="p-3 bg-neutral-950/50 hover:bg-red-500/10 hover:text-red-400 text-neutral-500 rounded-xl border border-white/5 hover:border-red-500/20 transition-colors cursor-pointer" title="Remove audio">
+                   <mat-icon class="text-base !flex !items-center !justify-center" style="font-size: 16px; width: 16px; height: 16px;">delete</mat-icon>
+                 </button>
+               }
+             </div>
              <input id="audio-upload" type="file" accept="audio/*" class="hidden" (change)="onAudioSelected($event)">
-             <label for="logo-upload" class="flex items-center gap-3 p-3 rounded-xl border border-white/5 hover:border-white/20 bg-neutral-950/50 cursor-pointer transition-colors group">
-                <mat-icon class="text-neutral-500 group-hover:text-red-400 transition-colors">image</mat-icon>
-                <div class="flex-1 overflow-hidden">
-                  <div class="text-sm font-medium truncate">{{ logoFile() ? logoFile()!.name : translations().addWatermark }}</div>
+             
+              <div class="flex items-center gap-2">
+                <label for="logo-upload" class="flex-1 flex items-center gap-3 p-3 rounded-xl border border-white/5 hover:border-white/20 bg-neutral-950/50 cursor-pointer transition-colors group">
+                   <mat-icon class="text-neutral-500 group-hover:text-red-400 transition-colors">image</mat-icon>
+                   <div class="flex-1 overflow-hidden">
+                      <div class="text-sm font-medium truncate">{{ logoFile() ? logoFile()!.name : translations().addWatermark }}</div>
+                   </div>
+                </label>
+                @if (logoFile()) {
+                  <button (click)="removeWatermark()" class="p-3 bg-neutral-950/50 hover:bg-red-500/10 hover:text-red-400 text-neutral-500 rounded-xl border border-white/5 hover:border-red-500/20 transition-colors cursor-pointer" title="{{ translations().removeWatermark }}">
+                    <mat-icon class="text-base !flex !items-center !justify-center" style="font-size: 16px; width: 16px; height: 16px;">delete</mat-icon>
+                  </button>
+                }
+              </div>
+              <input id="logo-upload" type="file" accept="image/*" class="hidden" (change)="onLogoSelected($event)">
+
+              @if (logoFile()) {
+                <div class="p-3.5 rounded-xl bg-neutral-950/45 border border-white/5 flex flex-col gap-3">
+                   <div class="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">
+                     {{ translations().logoSettings }}
+                   </div>
+                   
+                   <div class="flex items-center gap-4">
+                      <!-- Position choice 2x2 dots grid -->
+                      <div class="flex flex-col gap-1 items-center">
+                         <div class="text-[9px] text-neutral-500 font-mono">{{ translations().logoPosition }}</div>
+                         <div class="grid grid-cols-2 gap-1 w-[72px] h-[52px] bg-neutral-955 p-1 rounded-lg border border-white/5">
+                            <button (click)="logoPosition.set('top-left')" 
+                                    class="rounded transition-all duration-200 border cursor-pointer flex items-center justify-center p-0.5"
+                                    [class.bg-red-500/20]="logoPosition() === 'top-left'"
+                                    [class.border-red-500/40]="logoPosition() === 'top-left'"
+                                    [class.bg-neutral-900]="logoPosition() !== 'top-left'"
+                                    [class.border-white/5]="logoPosition() !== 'top-left'"
+                                    title="{{ translations().logoTopLeft }}">
+                              <div class="w-1.5 h-1.5 rounded-full" [class.bg-red-400]="logoPosition() === 'top-left'" [class.bg-neutral-700]="logoPosition() !== 'top-left'"></div>
+                            </button>
+                            <button (click)="logoPosition.set('top-right')" 
+                                    class="rounded transition-all duration-200 border cursor-pointer flex items-center justify-center p-0.5"
+                                    [class.bg-red-500/20]="logoPosition() === 'top-right'"
+                                    [class.border-red-500/40]="logoPosition() === 'top-right'"
+                                    [class.bg-neutral-900]="logoPosition() !== 'top-right'"
+                                    [class.border-white/5]="logoPosition() !== 'top-right'"
+                                    title="{{ translations().logoTopRight }}">
+                              <div class="w-1.5 h-1.5 rounded-full" [class.bg-red-400]="logoPosition() === 'top-right'" [class.bg-neutral-700]="logoPosition() !== 'top-right'"></div>
+                            </button>
+                            <button (click)="logoPosition.set('bottom-left')" 
+                                    class="rounded transition-all duration-200 border cursor-pointer flex items-center justify-center p-0.5"
+                                    [class.bg-red-500/20]="logoPosition() === 'bottom-left'"
+                                    [class.border-red-500/40]="logoPosition() === 'bottom-left'"
+                                    [class.bg-neutral-900]="logoPosition() !== 'bottom-left'"
+                                    [class.border-white/5]="logoPosition() !== 'bottom-left'"
+                                    title="{{ translations().logoBottomLeft }}">
+                              <div class="w-1.5 h-1.5 rounded-full" [class.bg-red-400]="logoPosition() === 'bottom-left'" [class.bg-neutral-700]="logoPosition() !== 'bottom-left'"></div>
+                            </button>
+                            <button (click)="logoPosition.set('bottom-right')" 
+                                    class="rounded transition-all duration-200 border cursor-pointer flex items-center justify-center p-0.5"
+                                    [class.bg-red-500/20]="logoPosition() === 'bottom-right'"
+                                    [class.border-red-500/40]="logoPosition() === 'bottom-right'"
+                                    [class.bg-neutral-900]="logoPosition() !== 'bottom-right'"
+                                    [class.border-white/5]="logoPosition() !== 'bottom-right'"
+                                    title="{{ translations().logoBottomRight }}">
+                              <div class="w-1.5 h-1.5 rounded-full" [class.bg-red-400]="logoPosition() === 'bottom-right'" [class.bg-neutral-700]="logoPosition() !== 'bottom-right'"></div>
+                            </button>
+                         </div>
+                      </div>
+                      
+                      <!-- Sizing and transparency range controls -->
+                      <div class="flex-1 flex flex-col gap-4">
+                         <div class="flex flex-col gap-1.5">
+                            <div class="flex justify-between text-[10px] text-neutral-400">
+                               <span>{{ translations().logoOpacity }}</span>
+                               <span class="font-mono text-neutral-500">{{ logoOpacity() }}%</span>
+                            </div>
+                            <input type="range" [ngModel]="logoOpacity()" (ngModelChange)="logoOpacity.set($event)" min="10" max="100"
+                                   class="w-full h-1 bg-neutral-800 rounded appearance-none cursor-pointer accent-red-500">
+                         </div>
+                         <div class="flex flex-col gap-1.5">
+                            <div class="flex justify-between text-[10px] text-neutral-400">
+                               <span>{{ translations().logoSize }}</span>
+                               <span class="font-mono text-neutral-500">{{ logoSize() }}%</span>
+                            </div>
+                            <input type="range" [ngModel]="logoSize()" (ngModelChange)="logoSize.set($event)" min="5" max="35"
+                                   class="w-full h-1 bg-neutral-800 rounded appearance-none cursor-pointer accent-red-500">
+                         </div>
+                      </div>
+                   </div>
                 </div>
-             </label>
-             <input id="logo-upload" type="file" accept="image/*" class="hidden" (change)="onLogoSelected($event)">
+              }
           </div>
 
           <!-- Volume -->
-          <div class="flex flex-col gap-2">
-             <div class="flex justify-between items-center">
-                <span class="text-sm font-medium text-neutral-400">{{ translations().videoVolume }}</span>
-                <span class="text-xs text-neutral-500">{{ volume() }}%</span>
+          <div class="flex flex-col gap-4">
+             <div class="flex flex-col gap-2">
+                <div class="flex justify-between items-center">
+                   <span class="text-sm font-medium text-neutral-400">{{ translations().videoVolume }}</span>
+                   <span class="text-xs text-neutral-500">{{ volume() }}%</span>
+                </div>
+                <input type="range" [ngModel]="volume()" (ngModelChange)="setVideoVolume($event)" min="0" max="200"
+                   class="w-full h-2 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-red-500">
              </div>
-             <input type="range" [ngModel]="volume()" (ngModelChange)="volume.set($event)" min="0" max="200"
-                class="w-full h-2 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-red-500">
+
+             @if (audioFile()) {
+               <div class="flex flex-col gap-2">
+                  <div class="flex justify-between items-center">
+                     <span class="text-sm font-medium text-neutral-400">{{ translations().bgMusicVolume }}</span>
+                     <span class="text-xs text-neutral-500">{{ bgVolume() }}%</span>
+                  </div>
+                  <input type="range" [ngModel]="bgVolume()" (ngModelChange)="setBgVolume($event)" min="0" max="100"
+                     class="w-full h-2 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-emerald-500">
+               </div>
+             }
           </div>
           
           <!-- Format -->
@@ -361,10 +549,10 @@
       <div class="flex items-center gap-1.5">
         <span class="font-medium text-neutral-300">Ichigo Editor</span>
         <span class="text-neutral-700">•</span>
-        <span>v1.0.0</span>
+        <span>v1.0.1</span>
       </div>
       <div class="flex flex-wrap justify-center items-center gap-1.5 font-sans">
-        <a href="https://github.com" target="_blank" rel="noopener noreferrer" class="hover:text-neutral-300 transition-colors cursor-pointer">GitHub</a>
+        <a href="https://github.com/kiencang/Ichigo-Editor" target="_blank" rel="noopener noreferrer" class="hover:text-neutral-300 transition-colors cursor-pointer">GitHub</a>
         <span class="text-neutral-700">•</span>
         <span class="text-neutral-400">Nguyễn Đức Anh</span>
         <span class="text-neutral-700">•</span>

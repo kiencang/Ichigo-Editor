@@ -36,6 +36,15 @@ export class App {
       overlaysAudio: isVi ? 'Lớp phủ & Âm thanh' : 'Overlays & Audio',
       addBgAudio: isVi ? 'Thêm nhạc nền' : 'Add background audio',
       addWatermark: isVi ? 'Thêm hình mờ logo/watermark' : 'Add watermark logo',
+      logoSettings: isVi ? 'Cấu hình logo/watermark' : 'Watermark Logo Settings',
+      logoPosition: isVi ? 'Vị trí hình mờ' : 'Watermark position',
+      logoOpacity: isVi ? 'Độ mờ hình mờ' : 'Watermark opacity',
+      logoSize: isVi ? 'Kích thước hình mờ' : 'Watermark size',
+      logoTopLeft: isVi ? 'Trên - Trái' : 'Top-Left',
+      logoTopRight: isVi ? 'Trên - Phải' : 'Top-Right',
+      logoBottomLeft: isVi ? 'Dưới - Trái' : 'Bottom-Left',
+      logoBottomRight: isVi ? 'Dưới - Phải' : 'Bottom-Right',
+      removeWatermark: isVi ? 'Xóa hình mờ' : 'Remove watermark',
       videoVolume: isVi ? 'Âm lượng video' : 'Video Volume',
       outputFormat: isVi ? 'Định dạng đầu ra' : 'Output Format',
       gifLimit: isVi ? ' (không dài hơn 60s)' : ' (not longer than 60s)',
@@ -43,6 +52,9 @@ export class App {
       rendering: isVi ? 'Đang xuất' : 'Rendering',
       exportComplete: isVi ? 'Xuất Hoàn Tất' : 'Export Complete',
       downloadOutput: isVi ? 'Tải Xuống Kết Quả' : 'Download Output',
+      bgAudioTrack: isVi ? 'Nhạc nền' : 'Background music',
+      bgMusicVolume: isVi ? 'Âm lượng nhạc nền' : 'Background Music Volume',
+      extractingBgWaveform: isVi ? 'Đang phân tích nhạc nền...' : 'Analyzing background music...',
       errMaxSize: (maxMB: number, actualMB: string) => isVi 
         ? `Dung lượng video vượt quá giới hạn cho phép (Tối đa ${maxMB}MB. Tệp tin của bạn: ${actualMB}MB).` 
         : `Video file size exceeds the allowed limit (Maximum ${maxMB}MB. Your file: ${actualMB}MB).`,
@@ -100,6 +112,15 @@ export class App {
   
   audioFile = signal<File | null>(null);
   logoFile = signal<File | null>(null);
+  logoPreviewUrl = signal<string | null>(null);
+  logoPosition = signal<'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'>('top-right');
+  logoOpacity = signal<number>(50);
+  logoSize = signal<number>(15);
+  bgVolume = signal<number>(30);
+  bgWaveform = signal<number[]>([]);
+  isExtractingBgWaveform = signal<boolean>(false);
+  audioPreviewUrl = signal<string | null>(null);
+  previewAudio: HTMLAudioElement | null = null;
   
   currentTool = signal<'pointer' | 'pen' | 'arrow'>('pointer');
   color = signal<string>('#ef4444'); // Tailwind red-500
@@ -109,6 +130,9 @@ export class App {
   currentTime = signal<number>(0);
   isPlaying = signal<boolean>(false);
   activeDrag = signal<'start' | 'end' | 'playhead' | null>(null);
+
+  waveform = signal<number[]>([]);
+  isExtractingWaveform = signal<boolean>(false);
 
   rulerTicks = computed(() => {
     const duration = this.videoDuration();
@@ -177,6 +201,7 @@ export class App {
       this.clearCanvas();
       this.outputUrl.set(null);
       this.trimStart.set(0);
+      this.extractAudioWaveform(file);
     }
   }
 
@@ -184,6 +209,54 @@ export class App {
     const file = (event.target as HTMLInputElement).files?.[0];
     if (file) {
       this.audioFile.set(file);
+      if (this.audioPreviewUrl()) {
+        URL.revokeObjectURL(this.audioPreviewUrl()!);
+      }
+      const url = URL.createObjectURL(file);
+      this.audioPreviewUrl.set(url);
+      
+      if (!this.previewAudio) {
+        this.previewAudio = new Audio();
+      }
+      this.previewAudio.src = url;
+      this.previewAudio.volume = this.bgVolume() / 100;
+      
+      if (this.videoEl) {
+        const video = this.videoEl.nativeElement;
+        this.previewAudio.currentTime = Math.max(0, video.currentTime - this.trimStart());
+        if (!video.paused) {
+          this.previewAudio.play().catch(err => console.warn(err));
+        }
+      }
+      
+      this.extractBgAudioWaveform(file);
+    }
+  }
+
+  removeBgAudio() {
+    this.audioFile.set(null);
+    this.bgWaveform.set([]);
+    if (this.audioPreviewUrl()) {
+      URL.revokeObjectURL(this.audioPreviewUrl()!);
+      this.audioPreviewUrl.set(null);
+    }
+    if (this.previewAudio) {
+      this.previewAudio.pause();
+      this.previewAudio = null;
+    }
+  }
+
+  setBgVolume(val: number) {
+    this.bgVolume.set(val);
+    if (this.previewAudio) {
+      this.previewAudio.volume = val / 100;
+    }
+  }
+
+  setVideoVolume(val: number) {
+    this.volume.set(val);
+    if (this.videoEl && this.videoEl.nativeElement) {
+      this.videoEl.nativeElement.volume = Math.max(0, Math.min(1.0, val / 100));
     }
   }
   
@@ -191,6 +264,18 @@ export class App {
     const file = (event.target as HTMLInputElement).files?.[0];
     if (file) {
       this.logoFile.set(file);
+      if (this.logoPreviewUrl()) {
+        URL.revokeObjectURL(this.logoPreviewUrl()!);
+      }
+      this.logoPreviewUrl.set(URL.createObjectURL(file));
+    }
+  }
+
+  removeWatermark() {
+    this.logoFile.set(null);
+    if (this.logoPreviewUrl()) {
+      URL.revokeObjectURL(this.logoPreviewUrl()!);
+      this.logoPreviewUrl.set(null);
     }
   }
 
@@ -233,20 +318,34 @@ export class App {
     if (!this.videoEl) return;
     const video = this.videoEl.nativeElement;
     if (video.paused) {
+      if (video.currentTime >= this.trimEnd()) {
+        video.currentTime = this.trimStart();
+      }
       video.play().then(() => {
         this.isPlaying.set(true);
+        if (this.previewAudio) {
+          this.previewAudio.currentTime = Math.max(0, video.currentTime - this.trimStart());
+          this.previewAudio.play().catch(e => console.warn(e));
+        }
       }).catch(err => console.error(err));
     } else {
       video.pause();
       this.isPlaying.set(false);
+      if (this.previewAudio) {
+        this.previewAudio.pause();
+      }
     }
   }
 
   seekTo(seconds: number) {
     if (!this.videoEl) return;
     const video = this.videoEl.nativeElement;
-    video.currentTime = Math.max(0, Math.min(this.videoDuration(), seconds));
-    this.currentTime.set(video.currentTime);
+    const target = Math.max(0, Math.min(this.videoDuration(), seconds));
+    video.currentTime = target;
+    this.currentTime.set(target);
+    if (this.previewAudio) {
+      this.previewAudio.currentTime = Math.max(0, target - this.trimStart());
+    }
   }
 
   cutStartAtCurrentTime() {
@@ -267,8 +366,31 @@ export class App {
 
   onTimeUpdate() {
     if (this.videoEl) {
-      this.currentTime.set(this.videoEl.nativeElement.currentTime);
-      this.isPlaying.set(!this.videoEl.nativeElement.paused);
+      const video = this.videoEl.nativeElement;
+      this.currentTime.set(video.currentTime);
+      this.isPlaying.set(!video.paused);
+      
+      // Auto pause at trim boundary
+      if (video.currentTime >= this.trimEnd()) {
+        video.pause();
+        this.isPlaying.set(false);
+        if (this.previewAudio) {
+          this.previewAudio.pause();
+        }
+      } else {
+        // Sync background audio context
+        if (this.previewAudio) {
+          const expected = Math.max(0, video.currentTime - this.trimStart());
+          if (Math.abs(this.previewAudio.currentTime - expected) > 0.15) {
+            this.previewAudio.currentTime = expected;
+          }
+          if (video.paused && !this.previewAudio.paused) {
+            this.previewAudio.pause();
+          } else if (!video.paused && this.previewAudio.paused) {
+            this.previewAudio.play().catch(e => console.warn(e));
+          }
+        }
+      }
     }
   }
 
@@ -349,6 +471,8 @@ export class App {
     this.videoHeight.set(video.videoHeight);
     this.trimEnd.set(video.duration);
     this.checkFormatLimits();
+    
+    video.volume = Math.max(0, Math.min(1.0, this.volume() / 100));
     
     if (this.canvasEl) {
       this.canvasEl.nativeElement.width = video.videoWidth;
@@ -528,7 +652,7 @@ export class App {
           audioEl.crossOrigin = 'anonymous';
           const bgSource = audioCtx.createMediaElementSource(audioEl);
           const bgGain = audioCtx.createGain();
-          bgGain.gain.value = 1.0;
+          bgGain.gain.value = this.bgVolume() / 100;
           bgSource.connect(bgGain);
           bgGain.connect(dest);
 
@@ -636,10 +760,32 @@ export class App {
 
         // Draw watermark
         if (logoLoaded) {
-          const margin = 20;
-          const logoW = canvas.width * 0.15;
+          const margin = canvas.width * 0.03;
+          const logoW = canvas.width * (this.logoSize() / 100);
           const logoH = logoImg.height * (logoW / logoImg.width);
-          ctx.drawImage(logoImg, canvas.width - logoW - margin, margin, logoW, logoH);
+          
+          let logoX = canvas.width - logoW - margin;
+          let logoY = margin;
+          
+          const pos = this.logoPosition();
+          if (pos === 'top-left') {
+            logoX = margin;
+            logoY = margin;
+          } else if (pos === 'top-right') {
+            logoX = canvas.width - logoW - margin;
+            logoY = margin;
+          } else if (pos === 'bottom-left') {
+            logoX = margin;
+            logoY = canvas.height - logoH - margin;
+          } else if (pos === 'bottom-right') {
+            logoX = canvas.width - logoW - margin;
+            logoY = canvas.height - logoH - margin;
+          }
+          
+          ctx.save();
+          ctx.globalAlpha = this.logoOpacity() / 100;
+          ctx.drawImage(logoImg, logoX, logoY, logoW, logoH);
+          ctx.restore();
         }
 
         // Output Progress
@@ -740,10 +886,32 @@ export class App {
         
         // Draw watermark logo
         if (logoLoaded) {
-          const margin = 10;
-          const logoW = gifWidth * 0.15;
+          const margin = gifWidth * 0.03;
+          const logoW = gifWidth * (this.logoSize() / 100);
           const logoH = logoImg.height * (logoW / logoImg.width);
-          gifCtx.drawImage(logoImg, gifWidth - logoW - margin, margin, logoW, logoH);
+          
+          let logoX = gifWidth - logoW - margin;
+          let logoY = margin;
+          
+          const pos = this.logoPosition();
+          if (pos === 'top-left') {
+            logoX = margin;
+            logoY = margin;
+          } else if (pos === 'top-right') {
+            logoX = gifWidth - logoW - margin;
+            logoY = margin;
+          } else if (pos === 'bottom-left') {
+            logoX = margin;
+            logoY = gifHeight - logoH - margin;
+          } else if (pos === 'bottom-right') {
+            logoX = gifWidth - logoW - margin;
+            logoY = gifHeight - logoH - margin;
+          }
+          
+          gifCtx.save();
+          gifCtx.globalAlpha = this.logoOpacity() / 100;
+          gifCtx.drawImage(logoImg, logoX, logoY, logoW, logoH);
+          gifCtx.restore();
         }
 
         // Quantize colors and write GIF frame
@@ -801,5 +969,202 @@ export class App {
       a.click();
       URL.revokeObjectURL(url);
     });
+  }
+
+  extractAudioWaveform(file: File) {
+    this.isExtractingWaveform.set(true);
+    this.waveform.set([]);
+    
+    // Fallback if AudioContext is not supported
+    const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextClass) {
+      this.generatePlaceholderWaveform();
+      return;
+    }
+    
+    const audioCtx = new AudioContextClass();
+    const reader = new FileReader();
+    
+    reader.onload = async (e) => {
+      try {
+        const arrayBuffer = e.target?.result as ArrayBuffer;
+        if (!arrayBuffer) {
+          this.generatePlaceholderWaveform();
+          audioCtx.close();
+          return;
+        }
+        
+        audioCtx.decodeAudioData(
+          arrayBuffer,
+          (audioBuffer) => {
+            try {
+              if (audioBuffer.numberOfChannels === 0) {
+                this.generatePlaceholderWaveform();
+                audioCtx.close();
+                return;
+              }
+              const channelData = audioBuffer.getChannelData(0); // get left channel
+              const numSamples = 120; // 120 bars
+              const blockSize = Math.floor(channelData.length / numSamples) || 1;
+              const amps: number[] = [];
+              
+              let maxAmp = 0;
+              for (let i = 0; i < numSamples; i++) {
+                const start = i * blockSize;
+                let sum = 0;
+                let count = 0;
+                for (let j = 0; j < blockSize && (start + j) < channelData.length; j++) {
+                  const val = channelData[start + j];
+                  sum += val * val;
+                  count++;
+                }
+                const rms = count > 0 ? Math.sqrt(sum / count) : 0;
+                amps.push(rms);
+                if (rms > maxAmp) {
+                  maxAmp = rms;
+                }
+              }
+              
+              // Normalize the values to the range [0.1, 0.95] for aesthetic design
+              const normalized = amps.map(v => maxAmp > 0 ? Math.min(0.95, Math.max(0.12, (v / maxAmp) * 0.95)) : 0.15);
+              this.waveform.set(normalized);
+              this.isExtractingWaveform.set(false);
+              audioCtx.close();
+            } catch (err) {
+              console.warn('Error processing decoded audio samples:', err);
+              this.generatePlaceholderWaveform();
+              audioCtx.close();
+            }
+          },
+          (err) => {
+            console.warn('Could not decode audio data directly, falling back to beautiful placeholder wave:', err);
+            this.generatePlaceholderWaveform();
+            audioCtx.close();
+          }
+        );
+      } catch (err) {
+        console.error('Waveform extraction thread failed:', err);
+        this.generatePlaceholderWaveform();
+        audioCtx.close();
+      }
+    };
+    reader.onerror = () => {
+      this.generatePlaceholderWaveform();
+      audioCtx.close();
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  generatePlaceholderWaveform() {
+    // Generate a beautiful organic dummy waveform that is visually active for aesthetic consistency
+    const numSamples = 120;
+    const amps: number[] = [];
+    for (let i = 0; i < numSamples; i++) {
+      // Natural rolling waves blending sine and cosine waves plus high frequency noise
+      const val = 0.2 + 0.45 * Math.sin(i * 0.12) * Math.cos(i * 0.06) + 0.2 * Math.sin(i * 0.35) + 0.15 * Math.cos(i * 0.7);
+      amps.push(Math.min(0.95, Math.max(0.12, Math.abs(val))));
+    }
+    this.waveform.set(amps);
+    this.isExtractingWaveform.set(false);
+  }
+
+  isBarSelected(index: number): boolean {
+    const duration = this.videoDuration();
+    if (duration <= 0) return false;
+    const barTime = (index / 120) * duration;
+    return barTime >= this.trimStart() && barTime <= this.trimEnd();
+  }
+
+  extractBgAudioWaveform(file: File) {
+    this.isExtractingBgWaveform.set(true);
+    this.bgWaveform.set([]);
+    
+    const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextClass) {
+      this.generatePlaceholderBgWaveform();
+      return;
+    }
+    
+    const audioCtx = new AudioContextClass();
+    const reader = new FileReader();
+    
+    reader.onload = async (e) => {
+      try {
+        const arrayBuffer = e.target?.result as ArrayBuffer;
+        if (!arrayBuffer) {
+          this.generatePlaceholderBgWaveform();
+          audioCtx.close();
+          return;
+        }
+        
+        audioCtx.decodeAudioData(
+          arrayBuffer,
+          (audioBuffer) => {
+            try {
+              if (audioBuffer.numberOfChannels === 0) {
+                this.generatePlaceholderBgWaveform();
+                audioCtx.close();
+                return;
+              }
+              const channelData = audioBuffer.getChannelData(0);
+              const numSamples = 120;
+              const blockSize = Math.floor(channelData.length / numSamples) || 1;
+              const amps: number[] = [];
+              
+              let maxAmp = 0;
+              for (let i = 0; i < numSamples; i++) {
+                const start = i * blockSize;
+                let sum = 0;
+                let count = 0;
+                for (let j = 0; j < blockSize && (start + j) < channelData.length; j++) {
+                  const val = channelData[start + j];
+                  sum += val * val;
+                  count++;
+                }
+                const rms = count > 0 ? Math.sqrt(sum / count) : 0;
+                amps.push(rms);
+                if (rms > maxAmp) {
+                  maxAmp = rms;
+                }
+              }
+              
+              const normalized = amps.map(v => maxAmp > 0 ? Math.min(0.95, Math.max(0.12, (v / maxAmp) * 0.95)) : 0.15);
+              this.bgWaveform.set(normalized);
+              this.isExtractingBgWaveform.set(false);
+              audioCtx.close();
+            } catch (err) {
+              console.warn('Error processing decoded bg audio samples:', err);
+              this.generatePlaceholderBgWaveform();
+              audioCtx.close();
+            }
+          },
+          (err) => {
+            console.warn('Could not decode bg audio data directly, falling back to beautiful placeholder wave:', err);
+            this.generatePlaceholderBgWaveform();
+            audioCtx.close();
+          }
+        );
+      } catch (err) {
+        console.error('Bg Waveform extraction thread failed:', err);
+        this.generatePlaceholderBgWaveform();
+        audioCtx.close();
+      }
+    };
+    reader.onerror = () => {
+      this.generatePlaceholderBgWaveform();
+      audioCtx.close();
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  generatePlaceholderBgWaveform() {
+    const numSamples = 120;
+    const amps: number[] = [];
+    for (let i = 0; i < numSamples; i++) {
+      const val = 0.25 + 0.35 * Math.sin(i * 0.18 + 0.5) * Math.cos(i * 0.08) + 0.15 * Math.sin(i * 0.45);
+      amps.push(Math.min(0.95, Math.max(0.12, Math.abs(val))));
+    }
+    this.bgWaveform.set(amps);
+    this.isExtractingBgWaveform.set(false);
   }
 }
