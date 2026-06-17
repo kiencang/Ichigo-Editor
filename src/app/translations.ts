@@ -72,7 +72,7 @@ export function getTranslations(lang: 'vi' | 'en'): AppTranslations {
     clear: isVi ? 'Xóa nét vẽ' : 'Clear',
     editorSettings: isVi ? 'Thiết lập ứng dụng' : 'Editor Settings',
     overlaysAudio: isVi ? 'Lớp phủ & Âm thanh' : 'Overlays & Audio',
-    addBgAudio: isVi ? 'Thêm nhạc nền' : 'Add background audio',
+    addBgAudio: isVi ? 'Thêm file nhạc' : 'Add audio file',
     addWatermark: isVi ? 'Thêm watermark' : 'Add watermark logo',
     logoSettings: isVi ? 'Cấu hình logo/watermark' : 'Watermark Logo Settings',
     logoPosition: isVi ? 'Vị trí hình mờ' : 'Watermark position',

@@ -13,8 +13,7 @@ export interface VideoExportConfig {
   videoFile: File | null;
   audioBitrate: number;
   videoBitrate: number;
-  audioFile: File | null;
-  bgVolume: number; // Bg volume 0-100
+  audioTracks: {id: string, file: File, url: string, duration: number, waveform: number[], volume: number}[];
   logoFile: File | null;
   logoPosition: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
   logoOpacity: number;
@@ -52,8 +51,7 @@ export class VideoExporter {
       videoFile,
       audioBitrate,
       videoBitrate,
-      audioFile,
-      bgVolume,
+      audioTracks,
       logoFile,
       logoPosition,
       logoOpacity,
@@ -175,26 +173,31 @@ export class VideoExporter {
       }
 
       // Background audio overlay
-      let audioEl: HTMLAudioElement | null = null;
-      if (audioFile) {
-        try {
-          audioEl = document.createElement('audio');
-          audioEl.src = URL.createObjectURL(audioFile);
-          audioEl.crossOrigin = 'anonymous';
-          const bgSource = audioCtx.createMediaElementSource(audioEl);
-          const bgGain = audioCtx.createGain();
-          bgGain.gain.value = bgVolume / 100;
-          bgSource.connect(bgGain);
-          bgGain.connect(dest);
+      const bgAudioElements: { el: HTMLAudioElement, start: number, end: number, finished: boolean }[] = [];
+      if (audioTracks && audioTracks.length > 0) {
+        let accumulated = 0;
+        for (const track of audioTracks) {
+          try {
+            const audioEl = document.createElement('audio');
+            audioEl.src = track.url;
+            audioEl.crossOrigin = 'anonymous';
+            const bgSource = audioCtx.createMediaElementSource(audioEl);
+            const bgGain = audioCtx.createGain();
+            bgGain.gain.value = track.volume / 100;
+            bgSource.connect(bgGain);
+            bgGain.connect(dest);
 
-          const silentHardwareGain2 = audioCtx.createGain();
-          silentHardwareGain2.gain.value = 0.0;
-          bgGain.connect(silentHardwareGain2);
-          silentHardwareGain2.connect(audioCtx.destination);
+            const silentHardwareGain2 = audioCtx.createGain();
+            silentHardwareGain2.gain.value = 0.0;
+            bgGain.connect(silentHardwareGain2);
+            silentHardwareGain2.connect(audioCtx.destination);
 
-          hasAudioNode = true;
-        } catch (bgAudioErr) {
-          console.error('Failed to route background audio overlay:', bgAudioErr);
+            bgAudioElements.push({ el: audioEl, start: accumulated, end: accumulated + track.duration, finished: false });
+            accumulated += track.duration;
+            hasAudioNode = true;
+          } catch (bgAudioErr) {
+            console.error('Failed to route background audio overlay:', bgAudioErr);
+          }
         }
       }
 
@@ -268,9 +271,6 @@ export class VideoExporter {
       // Start recording & playbacks
       recorder.start();
       await exportVid.play();
-      if (audioEl) {
-        await audioEl.play();
-      }
 
       onLog(translations.renderingSeq);
 
@@ -280,9 +280,7 @@ export class VideoExporter {
       const renderLoop = () => {
         if (exportVid.currentTime >= trimEndSec || exportVid.ended) {
           exportVid.pause();
-          if (audioEl) {
-            audioEl.pause();
-          }
+          bgAudioElements.forEach(bg => { if (!bg.el.paused) bg.el.pause(); });
           recorder.stop();
           cancelAnimationFrame(animationId);
           return;
@@ -294,6 +292,26 @@ export class VideoExporter {
 
         // Draw drawing annotations dynamically based on current export track progress
         drawStrokesOnContext(ctx, strokes, exportVid.currentTime, canvas.width, canvas.height, videoWidth, videoHeight);
+
+        // Manage background audio files
+        const vidTime = exportVid.currentTime - trimStart;
+        for (const bg of bgAudioElements) {
+           if (vidTime >= bg.start && vidTime < bg.end) {
+              if (bg.el.paused && !bg.finished) {
+                 if (Math.abs(bg.el.currentTime - (vidTime - bg.start)) > 0.3) {
+                     bg.el.currentTime = vidTime - bg.start;
+                 }
+                 bg.el.play().catch(() => void 0);
+              }
+           } else {
+              if (!bg.el.paused) {
+                 bg.el.pause();
+              }
+              if (vidTime >= bg.end) {
+                bg.finished = true;
+              }
+           }
+        }
 
         // Draw watermark
         if (logoLoaded) {

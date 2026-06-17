@@ -284,17 +284,26 @@
             </div>
 
             <!-- Background Music Timeline Row -->
-            @if (audioFile()) {
+            @if (audioTracks().length > 0 || isExtractingBgWaveform()) {
               <div class="relative h-10 bg-neutral-900/60 border border-white/5 rounded-xl overflow-hidden mt-1 flex items-center">
                 
-                <!-- Background Waveform bars -->
-                <div class="absolute inset-0 flex items-center justify-between px-2 gap-[1px] pointer-events-none">
-                  @for (amp of bgWaveform(); track $index) {
-                    <div [style.height.%]="amp * 100" 
-                         class="flex-1 min-w-[1px] max-w-[3px] rounded-full transition-all duration-300"
-                         [class.bg-neutral-500/30]="!isBarSelected($index)"
-                         [class.bg-emerald-500/80]="isBarSelected($index)">
-                    </div>
+                <div class="absolute inset-y-0 left-0 flex items-center z-20 text-[10px] text-emerald-500 font-mono pl-3 pointer-events-none opacity-40">
+                  <mat-icon style="font-size: 14px; width: 14px; height: 14px;">music_note</mat-icon>
+                </div>
+                
+                <div class="absolute top-0 bottom-0 left-0 flex">
+                  @for (track of audioTracks(); track track.id) {
+                      <div class="relative h-full flex flex-col justify-center border-r border-white/10 z-10"
+                           [style.width.px]="(track.duration / (videoDuration() || 1)) * timelineContainer.clientWidth">
+                          <div class="absolute inset-0 bg-emerald-500/10 pointer-events-none border-x border-emerald-500/20"></div>
+                          <div class="absolute inset-0 flex items-center justify-between px-1 gap-[1px] pointer-events-none">
+                            @for (amp of track.waveform; track $index) {
+                              <div [style.height.%]="amp * 100" 
+                                   class="flex-1 min-w-[1px] max-w-[3px] rounded-full transition-all duration-300 bg-emerald-500/40">
+                              </div>
+                            }
+                          </div>
+                      </div>
                   }
                 </div>
 
@@ -309,15 +318,6 @@
                   <div class="flex items-center gap-1 px-2 py-1 rounded-lg bg-neutral-950/85 border border-white/5 shadow-md text-[10px] font-medium text-emerald-400">
                     <mat-icon class="text-[12px] !flex !items-center !justify-center !leading-none" style="font-size: 12px; width: 12px; height: 12px;">music_note</mat-icon>
                     <span>{{ translations().bgAudioTrack }}</span>
-                  </div>
-                  
-                  <!-- Volume Slider right next to tag -->
-                  <div class="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-neutral-950/85 border border-white/5 shadow-md">
-                    <mat-icon class="text-[12px] text-neutral-400" style="font-size: 12px; width: 12px; height: 12px;">volume_down</mat-icon>
-                    <input type="range" [ngModel]="bgVolume()" (ngModelChange)="setBgVolume($event)" min="0" max="100"
-                           class="w-16 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
-                           title="Volume music">
-                    <span class="text-[9px] font-mono text-neutral-400 w-6 text-right">{{ bgVolume() }}%</span>
                   </div>
                 </div>
 
@@ -347,6 +347,51 @@
 
           </div>
 
+        </div>
+
+        <!-- Background Audio Tracks -->
+        <div class="p-4 rounded-2xl bg-neutral-900 border border-white/5 flex flex-col gap-3">
+            <div class="flex items-center justify-between">
+              <span class="text-sm font-medium text-neutral-400">{{ translations().bgAudioTrack }}</span>
+              <label for="bg-audio-upload" class="px-3 py-1.5 rounded-lg bg-neutral-950 hover:bg-neutral-800 text-xs font-medium border border-white/10 cursor-pointer transition-colors text-neutral-300 flex items-center gap-1">
+                 <mat-icon style="font-size: 14px; width: 14px; height: 14px;">add</mat-icon>
+                 {{ translations().addBgAudio }}
+              </label>
+              <input id="bg-audio-upload" type="file" accept="audio/*" multiple class="hidden" (change)="onAudioSelected($event)">
+            </div>
+            
+            @if (audioTracks().length > 0) {
+              <div class="flex flex-col gap-2">
+                 @for (track of audioTracks(); track track.id; let idx = $index) {
+                    <div class="flex flex-col gap-2 p-2 rounded-xl bg-neutral-950/50 border transition-colors"
+                         [class.border-white_5]="dragOverTrackIndex !== idx"
+                         [class.border-emerald-500]="dragOverTrackIndex === idx"
+                         [class.opacity-50]="draggedTrackIndex === idx"
+                         (dragover)="onDragOver($event, idx)"
+                         (drop)="onDrop($event, idx)">
+                       <div class="flex items-center justify-between group">
+                           <div class="flex items-center gap-2 overflow-hidden flex-1 cursor-grab active:cursor-grabbing"
+                                draggable="true" 
+                                (dragstart)="onDragStart(idx)"
+                                (dragend)="onDragEnd()">
+                              <span class="text-[10px] bg-neutral-900 border border-white/5 text-neutral-400 font-mono px-1.5 py-0.5 rounded">{{ idx + 1 }}</span>
+                              <mat-icon class="text-emerald-500/70" style="font-size: 16px; width: 16px; height: 16px;">drag_indicator</mat-icon>
+                              <span class="text-xs text-neutral-300 truncate font-medium">{{ track.file.name }}</span>
+                              <span class="text-[10px] bg-neutral-900 border border-white/5 text-neutral-400 font-mono px-1.5 py-0.5 rounded">{{ formatTimeShort(track.duration) }}</span>
+                           </div>
+                           <button (click)="removeAudioTrack(track.id)" class="text-neutral-500 hover:text-red-400 bg-neutral-900 hover:bg-red-500/10 p-1 rounded-lg border border-white/5 cursor-pointer ml-2">
+                              <mat-icon style="font-size: 14px; width: 14px; height: 14px; display: flex; align-items: center; justify-content: center;">close</mat-icon>
+                           </button>
+                       </div>
+                       <div class="flex items-center gap-2 pl-[42px] pr-8">
+                         <mat-icon class="text-neutral-500" style="font-size: 12px; width: 12px; height: 12px;">volume_up</mat-icon>
+                         <input type="range" [ngModel]="track.volume" (ngModelChange)="setTrackVolume(track.id, $event)" min="0" max="100" class="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-emerald-500">
+                         <span class="text-[10px] text-neutral-500 w-6 text-right">{{ track.volume }}%</span>
+                       </div>
+                    </div>
+                 }
+              </div>
+            }
         </div>
 
         <!-- Annotation Tools -->
@@ -523,20 +568,6 @@
           <!-- Extra Assets -->
           <div class="flex flex-col gap-3">
              <span class="text-sm font-medium text-neutral-400">{{ translations().overlaysAudio }}</span>
-             <div class="flex items-center gap-2">
-               <label for="audio-upload" class="flex-1 flex items-center gap-3 p-3 rounded-xl border border-white/5 hover:border-white/20 bg-neutral-950/50 cursor-pointer transition-colors group">
-                  <mat-icon class="text-neutral-500 group-hover:text-red-400 transition-colors">audio_file</mat-icon>
-                  <div class="flex-1 overflow-hidden">
-                    <div class="text-sm font-medium truncate">{{ audioFile() ? audioFile()!.name : translations().addBgAudio }}</div>
-                  </div>
-               </label>
-               @if (audioFile()) {
-                 <button (click)="removeBgAudio()" class="p-3 bg-neutral-950/50 hover:bg-red-500/10 hover:text-red-400 text-neutral-500 rounded-xl border border-white/5 hover:border-red-500/20 transition-colors cursor-pointer" title="Remove audio">
-                   <mat-icon class="text-base !flex !items-center !justify-center" style="font-size: 16px; width: 16px; height: 16px;">delete</mat-icon>
-                 </button>
-               }
-             </div>
-             <input id="audio-upload" type="file" accept="audio/*" class="hidden" (change)="onAudioSelected($event)">
              
               <div class="flex items-center gap-2">
                 <label for="logo-upload" class="flex-1 flex items-center gap-3 p-3 rounded-xl border border-white/5 hover:border-white/20 bg-neutral-950/50 cursor-pointer transition-colors group">
@@ -637,17 +668,6 @@
                 <input type="range" [ngModel]="volume()" (ngModelChange)="setVideoVolume($event)" min="0" max="200"
                    class="w-full h-2 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-red-500">
              </div>
-
-             @if (audioFile()) {
-               <div class="flex flex-col gap-2">
-                  <div class="flex justify-between items-center">
-                     <span class="text-sm font-medium text-neutral-400">{{ translations().bgMusicVolume }}</span>
-                     <span class="text-xs text-neutral-500">{{ bgVolume() }}%</span>
-                  </div>
-                  <input type="range" [ngModel]="bgVolume()" (ngModelChange)="setBgVolume($event)" min="0" max="100"
-                     class="w-full h-2 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-emerald-500">
-               </div>
-             }
           </div>
           
           <!-- Format -->
@@ -734,7 +754,7 @@
       <div class="flex items-center gap-1.5">
         <span class="font-medium text-neutral-300">Ichigo Editor</span>
         <span class="text-neutral-700">•</span>
-        <span>v1.0.4</span>
+        <span>v1.0.5</span>
       </div>
       <div class="flex flex-wrap justify-center items-center gap-1.5 font-sans">
         <a href="https://github.com/kiencang/Ichigo-Editor" target="_blank" rel="noopener noreferrer" class="hover:text-neutral-300 transition-colors cursor-pointer">GitHub</a>

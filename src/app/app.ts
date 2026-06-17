@@ -59,16 +59,13 @@ export class App {
   audioBitrate = signal<number>(192000);
   videoBitrate = signal<number>(0); // 0 = Auto, other values are explicit bps: 2000000, 4000000, 8000000
   
-  audioFile = signal<File | null>(null);
+  audioTracks = signal<{id: string, file: File, url: string, duration: number, waveform: number[], volume: number}[]>([]);
+  isExtractingBgWaveform = signal<boolean>(false);
   logoFile = signal<File | null>(null);
   logoPreviewUrl = signal<string | null>(null);
   logoPosition = signal<'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'>('top-right');
   logoOpacity = signal<number>(50);
   logoSize = signal<number>(15);
-  bgVolume = signal<number>(30);
-  bgWaveform = signal<number[]>([]);
-  isExtractingBgWaveform = signal<boolean>(false);
-  audioPreviewUrl = signal<string | null>(null);
   previewAudio: HTMLAudioElement | null = null;
   
   currentTool = signal<'pointer' | 'pen' | 'arrow'>('pointer');
@@ -126,6 +123,38 @@ export class App {
   private startPos = {x: 0, y: 0};
   private savedImageData: ImageData | null = null;
 
+  draggedTrackIndex: number | null = null;
+  dragOverTrackIndex: number | null = null;
+
+  onDragStart(index: number) {
+    this.draggedTrackIndex = index;
+  }
+
+  onDragOver(event: DragEvent, index: number) {
+    event.preventDefault();
+    this.dragOverTrackIndex = index;
+  }
+
+  onDrop(event: DragEvent, index: number) {
+    event.preventDefault();
+    if (this.draggedTrackIndex !== null && this.draggedTrackIndex !== index) {
+      this.audioTracks.update(tracks => {
+        const newTracks = [...tracks];
+        const [movedTrack] = newTracks.splice(this.draggedTrackIndex!, 1);
+        newTracks.splice(index, 0, movedTrack);
+        return newTracks;
+      });
+      this.syncBackgroundAudio();
+    }
+    this.draggedTrackIndex = null;
+    this.dragOverTrackIndex = null;
+  }
+
+  onDragEnd() {
+    this.draggedTrackIndex = null;
+    this.dragOverTrackIndex = null;
+  }
+
   constructor() {
     afterNextRender(() => {
       this.initializeEngine();
@@ -165,52 +194,60 @@ export class App {
     }
   }
 
-  onAudioSelected(event: Event) {
-    const file = (event.target as HTMLInputElement).files?.[0];
-    if (file) {
-      this.audioFile.set(file);
-      if (this.audioPreviewUrl()) {
-        URL.revokeObjectURL(this.audioPreviewUrl()!);
-      }
-      const url = URL.createObjectURL(file);
-      this.audioPreviewUrl.set(url);
-      
-      if (!this.previewAudio) {
-        this.previewAudio = new Audio();
-      }
-      this.previewAudio.src = url;
-      this.previewAudio.volume = this.bgVolume() / 100;
-      
-      if (this.videoEl) {
-        const video = this.videoEl.nativeElement;
-        this.previewAudio.currentTime = Math.max(0, video.currentTime - this.trimStart());
-        if (!video.paused) {
-          this.previewAudio.play().catch(err => console.warn(err));
+  async onAudioSelected(event: Event) {
+    const input = event.target as HTMLInputElement;
+    if (input.files && input.files.length > 0) {
+      const files = Array.from(input.files);
+      input.value = ''; // Reset input
+      this.isExtractingBgWaveform.set(true);
+
+      const newTracks: {id: string, file: File, url: string, duration: number, waveform: number[], volume: number}[] = [];
+      for (const file of files) {
+        const url = URL.createObjectURL(file);
+        const duration = await new Promise<number>((resolve) => {
+          const a = document.createElement('audio');
+          a.onloadedmetadata = () => resolve(a.duration);
+          a.src = url;
+        });
+        
+        let waveform: number[] = [];
+        try {
+          const bars = Math.max(30, Math.floor((duration / 60) * 100));
+          waveform = await this.waveformProcessor.extractWaveform(file, Math.min(200, bars));
+        } catch(e) {
+          console.warn('Could not extract waveform', e);
         }
+        
+        newTracks.push({
+          id: Math.random().toString(36).substring(2, 9),
+          file,
+          url,
+          duration,
+          waveform,
+          volume: 20
+        });
       }
       
-      this.extractBgAudioWaveform(file);
+      this.audioTracks.update(tracks => [...tracks, ...newTracks]);
+      this.isExtractingBgWaveform.set(false);
+      
+      // Attempt to play if currently playing
+      this.syncBackgroundAudio();
     }
   }
 
-  removeBgAudio() {
-    this.audioFile.set(null);
-    this.bgWaveform.set([]);
-    if (this.audioPreviewUrl()) {
-      URL.revokeObjectURL(this.audioPreviewUrl()!);
-      this.audioPreviewUrl.set(null);
-    }
-    if (this.previewAudio) {
-      this.previewAudio.pause();
-      this.previewAudio = null;
-    }
+  removeAudioTrack(id: string) {
+    this.audioTracks.update(tracks => {
+      const track = tracks.find(t => t.id === id);
+      if (track) URL.revokeObjectURL(track.url);
+      return tracks.filter(t => t.id !== id);
+    });
+    this.syncBackgroundAudio();
   }
 
-  setBgVolume(val: number) {
-    this.bgVolume.set(val);
-    if (this.previewAudio) {
-      this.previewAudio.volume = val / 100;
-    }
+  setTrackVolume(id: string, volume: number) {
+    this.audioTracks.update(tracks => tracks.map(t => t.id === id ? { ...t, volume } : t));
+    this.syncBackgroundAudio();
   }
 
   setVideoVolume(val: number) {
@@ -272,17 +309,12 @@ export class App {
       }
       video.play().then(() => {
         this.isPlaying.set(true);
-        if (this.previewAudio) {
-          this.previewAudio.currentTime = Math.max(0, video.currentTime - this.trimStart());
-          this.previewAudio.play().catch(e => console.warn(e));
-        }
+        this.syncBackgroundAudio();
       }).catch(err => console.error(err));
     } else {
       video.pause();
       this.isPlaying.set(false);
-      if (this.previewAudio) {
-        this.previewAudio.pause();
-      }
+      this.syncBackgroundAudio();
     }
   }
 
@@ -292,9 +324,7 @@ export class App {
     const target = Math.max(0, Math.min(this.videoDuration(), seconds));
     video.currentTime = target;
     this.currentTime.set(target);
-    if (this.previewAudio) {
-      this.previewAudio.currentTime = Math.max(0, target - this.trimStart());
-    }
+    this.syncBackgroundAudio();
     this.redrawCanvas();
   }
 
@@ -327,22 +357,65 @@ export class App {
       if (video.currentTime >= this.trimEnd()) {
         video.pause();
         this.isPlaying.set(false);
+      }
+      this.syncBackgroundAudio();
+    }
+  }
+
+  syncBackgroundAudio() {
+    if (this.audioTracks().length === 0) {
+      if (this.previewAudio) {
+        this.previewAudio.pause();
+      }
+      return;
+    }
+    
+    // Find which track corresponds to the current video time relative to trimStart
+    if (!this.videoEl) return;
+    const videoCurrentTime = this.videoEl.nativeElement.currentTime;
+    const relativeTime = Math.max(0, videoCurrentTime - this.trimStart());
+    
+    let accumulatedTime = 0;
+    let targetTrack = null;
+    let trackLocalTime = 0;
+    
+    for (const track of this.audioTracks()) {
+      if (relativeTime >= accumulatedTime && relativeTime < accumulatedTime + track.duration) {
+        targetTrack = track;
+        trackLocalTime = relativeTime - accumulatedTime;
+        break;
+      }
+      accumulatedTime += track.duration;
+    }
+
+    if (!targetTrack) {
         if (this.previewAudio) {
-          this.previewAudio.pause();
+           this.previewAudio.pause();
         }
-      } else {
-        // Sync background audio context
-        if (this.previewAudio) {
-          const expected = Math.max(0, video.currentTime - this.trimStart());
-          if (Math.abs(this.previewAudio.currentTime - expected) > 0.15) {
-            this.previewAudio.currentTime = expected;
-          }
-          if (video.paused && !this.previewAudio.paused) {
-            this.previewAudio.pause();
-          } else if (!video.paused && this.previewAudio.paused) {
-            this.previewAudio.play().catch(e => console.warn(e));
-          }
-        }
+        return;
+    }
+
+    if (!this.previewAudio) {
+      this.previewAudio = new Audio();
+    }
+
+    this.previewAudio.volume = targetTrack.volume / 100;
+    
+    if (this.previewAudio.src !== targetTrack.url) {
+      const wasPlaying = !this.previewAudio.paused;
+      this.previewAudio.src = targetTrack.url;
+      this.previewAudio.currentTime = trackLocalTime;
+      if (wasPlaying || (!this.videoEl.nativeElement.paused && videoCurrentTime < this.trimEnd())) {
+         this.previewAudio.play().catch(e => console.warn(e));
+      }
+    } else {
+      if (Math.abs(this.previewAudio.currentTime - trackLocalTime) > 0.15) {
+        this.previewAudio.currentTime = trackLocalTime;
+      }
+      if ((this.videoEl.nativeElement.paused || videoCurrentTime >= this.trimEnd()) && !this.previewAudio.paused) {
+        this.previewAudio.pause();
+      } else if (!this.videoEl.nativeElement.paused && videoCurrentTime < this.trimEnd() && this.previewAudio.paused) {
+        this.previewAudio.play().catch(e => console.warn(e));
       }
     }
   }
@@ -595,8 +668,7 @@ export class App {
       videoFile: this.videoFile(),
       audioBitrate: this.audioBitrate(),
       videoBitrate: this.videoBitrate(),
-      audioFile: this.audioFile(),
-      bgVolume: this.bgVolume(),
+      audioTracks: this.audioTracks(),
       logoFile: this.logoFile(),
       logoPosition: this.logoPosition(),
       logoOpacity: this.logoOpacity(),
@@ -689,23 +761,4 @@ export class App {
     return barTime >= this.trimStart() && barTime <= this.trimEnd();
   }
 
-  extractBgAudioWaveform(file: File) {
-    this.isExtractingBgWaveform.set(true);
-    this.bgWaveform.set([]);
-
-    this.waveformProcessor.extractWaveform(file, 120)
-      .then((amps) => {
-        this.bgWaveform.set(amps);
-        this.isExtractingBgWaveform.set(false);
-      })
-      .catch((err) => {
-        console.warn('Background waveform extraction failed, falling back:', err);
-        this.generatePlaceholderBgWaveform();
-      });
-  }
-
-  generatePlaceholderBgWaveform() {
-    this.bgWaveform.set(this.waveformProcessor.generatePlaceholder(120, true));
-    this.isExtractingBgWaveform.set(false);
-  }
 }
