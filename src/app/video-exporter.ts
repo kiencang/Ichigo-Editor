@@ -1,14 +1,14 @@
 import { Injectable } from '@angular/core';
 import { Stroke, drawStrokesOnContext } from './stroke.types';
 import { getFilterCSS } from './filters.types';
+import { VideoSegment } from './segments';
 
 export interface VideoExportConfig {
   videoUrl: string;
   videoWidth: number;
   videoHeight: number;
   videoDuration: number;
-  trimStart: number;
-  trimEnd: number;
+  videoSegments: VideoSegment[];
   volume: number; // Volume 0-100
   outputFormat: string; // 'webm' | 'mp4'
   videoFile: File | null;
@@ -47,8 +47,7 @@ export class VideoExporter {
       videoWidth,
       videoHeight,
       videoDuration,
-      trimStart,
-      trimEnd,
+      videoSegments,
       volume,
       outputFormat,
       videoFile,
@@ -269,7 +268,16 @@ export class VideoExporter {
       };
 
       // Set starting markers
-      exportVid.currentTime = trimStart;
+      let currentSegIndex = 0;
+      let completedDuration = 0;
+      const finalDuration = videoSegments.reduce((sum, s) => sum + Math.max(0, s.end - s.start), 0);
+
+      if (videoSegments.length > 0) {
+        exportVid.currentTime = videoSegments[0].start;
+      } else {
+        exportVid.currentTime = 0;
+      }
+
       await new Promise<void>((resolve) => {
         exportVid.onseeked = () => resolve();
       });
@@ -281,14 +289,46 @@ export class VideoExporter {
       onLog(translations.renderingSeq);
 
       let animationId: number;
-      const trimEndSec = Math.min(trimEnd, videoDuration);
+      let isSeekingSegment = false;
 
       const renderLoop = () => {
-        if (exportVid.currentTime >= trimEndSec || exportVid.ended) {
+        if (videoSegments.length === 0) {
           exportVid.pause();
-          bgAudioElements.forEach(bg => { if (!bg.el.paused) bg.el.pause(); });
           recorder.stop();
-          cancelAnimationFrame(animationId);
+          return;
+        }
+
+        let currentSeg = videoSegments[currentSegIndex];
+        const currentOriginalTime = exportVid.currentTime;
+
+        // Auto transition to next segment
+        if (currentOriginalTime >= currentSeg.end || exportVid.ended) {
+          completedDuration += (currentSeg.end - currentSeg.start);
+          currentSegIndex++;
+          if (currentSegIndex >= videoSegments.length) {
+            exportVid.pause();
+            bgAudioElements.forEach(bg => { if (!bg.el.paused) bg.el.pause(); });
+            recorder.stop();
+            cancelAnimationFrame(animationId);
+            return;
+          } else {
+            currentSeg = videoSegments[currentSegIndex];
+            isSeekingSegment = true;
+            exportVid.pause();
+            exportVid.currentTime = currentSeg.start;
+            exportVid.onseeked = () => {
+              isSeekingSegment = false;
+              exportVid.play().catch(e => console.warn(e));
+            };
+            // Return early on this frame to let seek complete
+            bgAudioElements.forEach(bg => { if (!bg.el.paused) bg.el.pause(); });
+            animationId = requestAnimationFrame(renderLoop);
+            return;
+          }
+        }
+
+        if (isSeekingSegment) {
+          animationId = requestAnimationFrame(renderLoop);
           return;
         }
 
@@ -300,11 +340,11 @@ export class VideoExporter {
         ctx.drawImage(exportVid, 0, 0, canvas.width, canvas.height);
         ctx.filter = 'none';
 
-        // Draw drawing annotations dynamically based on current export track progress
+        // Draw drawing annotations dynamically based on current original video time
         drawStrokesOnContext(ctx, strokes, exportVid.currentTime, canvas.width, canvas.height, videoWidth, videoHeight);
 
-        // Manage background audio files
-        const vidTime = exportVid.currentTime - trimStart;
+        // Manage background audio files relative to virtual time
+        const vidTime = completedDuration + Math.max(0, exportVid.currentTime - currentSeg.start);
         for (const bg of bgAudioElements) {
            if (vidTime >= bg.start && vidTime < bg.end) {
               if (bg.el.paused && !bg.finished) {
@@ -353,10 +393,8 @@ export class VideoExporter {
           ctx.restore();
         }
 
-        // Progress
-        const duration = trimEndSec - trimStart;
-        const cur = exportVid.currentTime - trimStart;
-        const pct = Math.min(99, Math.max(0, Math.round((cur / duration) * 100)));
+        // Progress based on total virtual duration
+        const pct = Math.min(99, Math.max(0, Math.round((vidTime / (finalDuration || 1)) * 100)));
         onProgress(pct);
 
         animationId = requestAnimationFrame(renderLoop);

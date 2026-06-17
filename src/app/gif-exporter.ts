@@ -2,14 +2,14 @@ import { Injectable } from '@angular/core';
 import { GIFEncoder, quantize, applyPalette } from 'gifenc';
 import { Stroke, drawStrokesOnContext } from './stroke.types';
 import { getFilterCSS } from './filters.types';
+import { VideoSegment, getOriginalTime } from './segments';
 
 export interface GifExportConfig {
   videoUrl: string;
   videoWidth: number;
   videoHeight: number;
   videoDuration: number;
-  trimStart: number;
-  trimEnd: number;
+  videoSegments: VideoSegment[];
   logoFile: File | null;
   logoPosition: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
   logoOpacity: number;
@@ -39,9 +39,7 @@ export class GifExporter {
       videoUrl,
       videoWidth,
       videoHeight,
-      videoDuration,
-      trimStart,
-      trimEnd,
+      videoSegments,
       logoFile,
       logoPosition,
       logoOpacity,
@@ -103,20 +101,19 @@ export class GifExporter {
 
       onLog(translations.gifStep2);
 
-      const startTime = trimStart;
-      const endTime = Math.min(trimEnd, videoDuration);
-      const duration = endTime - startTime;
+      const totalDuration = videoSegments.reduce((sum, s) => sum + Math.max(0, s.end - s.start), 0);
       
       const frameRate = 10; // 10fps
       const frameStep = 1 / frameRate; // every 100ms
-      const totalFrames = Math.max(1, Math.floor(duration / frameStep));
+      const totalFrames = Math.max(1, Math.floor(totalDuration / frameStep));
       
       const encoder = GIFEncoder();
       let renderedFrames = 0;
       
       for (let i = 0; i < totalFrames; i++) {
-        const targetTime = startTime + (i * frameStep);
-        exportVid.currentTime = targetTime;
+        const targetVirtualTime = i * frameStep;
+        const targetOriginalTime = getOriginalTime(targetVirtualTime, videoSegments);
+        exportVid.currentTime = targetOriginalTime;
         
         await new Promise<void>((resolve) => {
           exportVid.onseeked = () => resolve();
@@ -129,8 +126,8 @@ export class GifExporter {
         }
         gifCtx.drawImage(exportVid, 0, 0, gifWidth, gifHeight);
         gifCtx.filter = 'none';
-        // Draw drawing annotations dynamically on targetGifCtx
-        drawStrokesOnContext(gifCtx, strokes, targetTime, gifWidth, gifHeight, videoWidth, videoHeight);
+        // Draw drawing annotations dynamically on targetGifCtx based on original time
+        drawStrokesOnContext(gifCtx, strokes, targetOriginalTime, gifWidth, gifHeight, videoWidth, videoHeight);
         
         // Draw watermark logo
         if (logoLoaded) {

@@ -2,14 +2,14 @@ import { Injectable, inject } from '@angular/core';
 import { VideoExporter } from './video-exporter';
 import { GifExporter } from './gif-exporter';
 import { Stroke } from './stroke.types';
+import { VideoSegment } from './segments';
 
 export interface ExportConfig {
   videoUrl: string;
   videoWidth: number;
   videoHeight: number;
   videoDuration: number;
-  trimStart: number;
-  trimEnd: number;
+  videoSegments: VideoSegment[];
   volume: number; // Volume 0-100
   outputFormat: string; // 'webm' | 'mp4' | 'gif'
   videoFile: File | null;

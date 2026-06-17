@@ -7,13 +7,16 @@ import { TimeFormatter } from './time-formatter';
 import { WaveformProcessor } from './waveform-processor';
 import { CanvasDrawer } from './canvas-drawer';
 import { ExportProcessor } from './export-processor';
-import { Stroke, drawStrokesOnContext } from './stroke.types';
 import { VIDEO_FILTERS, getFilterCSS } from './filters.types';
+import { BackgroundAudio } from './background-audio';
+import { VideoSegments } from './video-segments';
+import { VideoFilters } from './video-filters';
+import { ExportPanel } from './export-panel';
 
 @Component({
   changeDetection: ChangeDetectionStrategy.OnPush,
   selector: 'app-root',
-  imports: [FormsModule, MatIconModule, DecimalPipe],
+  imports: [FormsModule, MatIconModule, DecimalPipe, VideoFilters, ExportPanel],
   templateUrl: './app.html',
   styleUrl: './app.css',
 })
@@ -21,6 +24,8 @@ export class App {
   private waveformProcessor = inject(WaveformProcessor);
   private canvasDrawer = inject(CanvasDrawer);
   private exportProcessor = inject(ExportProcessor);
+  readonly backgroundAudio = inject(BackgroundAudio);
+  readonly videoSegmentsService = inject(VideoSegments);
 
   lang = signal<'vi' | 'en'>('vi');
 
@@ -41,20 +46,22 @@ export class App {
   
   videoFile = signal<File | null>(null);
   videoUrl = signal<string | null>(null);
-  videoDuration = signal(0);
+  videoDuration = this.videoSegmentsService.videoDuration;
   videoWidth = signal(0);
   videoHeight = signal(0);
   
-  trimStart = signal<number>(0);
-  trimEnd = signal<number>(0);
-  
-  trimmedDuration = computed(() => {
-    return Math.max(0, this.trimEnd() - this.trimStart());
-  });
+  videoSegments = this.videoSegmentsService.videoSegments;
+  selectedSegmentId = this.videoSegmentsService.selectedSegmentId;
+  segmentHistoryList = this.videoSegmentsService.segmentHistoryList;
 
-  isGifDisabled = computed(() => {
-    return this.trimmedDuration() > 60;
-  });
+  trimStart = this.videoSegmentsService.trimStart;
+  trimEnd = this.videoSegmentsService.trimEnd;
+  selectedSegmentStart = this.videoSegmentsService.selectedSegmentStart;
+  selectedSegmentEnd = this.videoSegmentsService.selectedSegmentEnd;
+  trimmedDuration = this.videoSegmentsService.trimmedDuration;
+  selectedSegmentIndex = this.videoSegmentsService.selectedSegmentIndex;
+  canUndo = this.videoSegmentsService.canUndo;
+  isGifDisabled = this.videoSegmentsService.isGifDisabled;
   volume = signal<number>(100);
   outputFormat = signal<string>('webm');
   audioBitrate = signal<number>(192000);
@@ -68,29 +75,21 @@ export class App {
     return getFilterCSS(this.selectedFilterId(), this.filterIntensity());
   }
   
-  audioTracks = signal<{id: string, file: File, url: string, duration: number, waveform: number[], volume: number, trimStart: number, trimEnd: number}[]>([]);
-  isExtractingBgWaveform = signal<boolean>(false);
+  audioTracks = this.backgroundAudio.audioTracks;
+  isExtractingBgWaveform = this.backgroundAudio.isExtractingBgWaveform;
   logoFile = signal<File | null>(null);
   logoPreviewUrl = signal<string | null>(null);
   logoPosition = signal<'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'>('top-right');
   logoOpacity = signal<number>(50);
   logoSize = signal<number>(15);
-  previewAudio: HTMLAudioElement | null = null;
-  playingTrackId = signal<string | null>(null);
-  isolatedPreviewTime = signal<number>(0);
-  isolatedPreviewAudio: HTMLAudioElement | null = null;
-  isolatedPreviewInterval: any = null;
+  playingTrackId = this.backgroundAudio.playingTrackId;
+  isolatedPreviewTime = this.backgroundAudio.isolatedPreviewTime;
   
-  currentTool = signal<'pointer' | 'pen' | 'arrow'>('pointer');
-  color = signal<string>('#ef4444'); // Tailwind red-500
-  strokes = signal<Stroke[]>([]);
-  activeStrokeId = signal<string | null>(null);
-  currentActiveStroke = computed(() => {
-    const id = this.activeStrokeId();
-    if (!id) return null;
-    return this.strokes().find(s => s.id === id) || null;
-  });
-  private activeStroke: Stroke | null = null;
+  currentTool = this.canvasDrawer.currentTool;
+  color = this.canvasDrawer.color;
+  strokes = this.canvasDrawer.strokes;
+  activeStrokeId = this.canvasDrawer.activeStrokeId;
+  currentActiveStroke = this.canvasDrawer.currentActiveStroke;
   
   outputUrl = signal<string | null>(null);
 
@@ -131,9 +130,6 @@ export class App {
   @ViewChild('timelineContainer') timelineContainer!: ElementRef<HTMLDivElement>;
   
   private ctx: CanvasRenderingContext2D | null = null;
-  private isPointerDown = false;
-  private lastPos = {x: 0, y: 0};
-  private startPos = {x: 0, y: 0};
   private savedImageData: ImageData | null = null;
 
   draggedTrackIndex: number | null = null;
@@ -202,139 +198,36 @@ export class App {
       this.videoUrl.set(URL.createObjectURL(file));
       this.clearCanvas();
       this.outputUrl.set(null);
-      this.trimStart.set(0);
       this.extractAudioWaveform(file);
     }
   }
 
   async onAudioSelected(event: Event) {
-    const input = event.target as HTMLInputElement;
-    if (input.files && input.files.length > 0) {
-      const files = Array.from(input.files);
-      input.value = ''; // Reset input
-      this.isExtractingBgWaveform.set(true);
-
-      const newTracks: {id: string, file: File, url: string, duration: number, waveform: number[], volume: number, trimStart: number, trimEnd: number}[] = [];
-      for (const file of files) {
-        const url = URL.createObjectURL(file);
-        const duration = await new Promise<number>((resolve) => {
-          const a = document.createElement('audio');
-          a.onloadedmetadata = () => resolve(a.duration);
-          a.src = url;
-        });
-        
-        let waveform: number[] = [];
-        try {
-          const bars = Math.max(30, Math.floor((duration / 60) * 100));
-          waveform = await this.waveformProcessor.extractWaveform(file, Math.min(200, bars));
-        } catch(e) {
-          console.warn('Could not extract waveform', e);
-        }
-        
-        newTracks.push({
-          id: Math.random().toString(36).substring(2, 9),
-          file,
-          url,
-          duration,
-          waveform,
-          volume: 10,
-          trimStart: 0,
-          trimEnd: duration
-        });
-      }
-      
-      this.audioTracks.update(tracks => [...tracks, ...newTracks]);
-      this.isExtractingBgWaveform.set(false);
-      
-      // Attempt to play if currently playing
-      this.syncBackgroundAudio();
-    }
+    await this.backgroundAudio.onAudioSelected(event, () => this.syncBackgroundAudio());
   }
 
   removeAudioTrack(id: string) {
-    this.audioTracks.update(tracks => {
-      const track = tracks.find(t => t.id === id);
-      if (track) URL.revokeObjectURL(track.url);
-      return tracks.filter(t => t.id !== id);
-    });
-    this.syncBackgroundAudio();
+    this.backgroundAudio.removeAudioTrack(id, () => this.syncBackgroundAudio());
   }
 
   setTrackVolume(id: string, volume: number) {
-    this.audioTracks.update(tracks => tracks.map(t => t.id === id ? { ...t, volume } : t));
-    
-    if (this.playingTrackId() === id && this.isolatedPreviewAudio) {
-      this.isolatedPreviewAudio.volume = volume / 100;
-    }
-    
-    this.syncBackgroundAudio();
+    this.backgroundAudio.setTrackVolume(id, volume, () => this.syncBackgroundAudio());
   }
 
   setTrackTrimStart(id: string, start: number) {
-    this.audioTracks.update(tracks => tracks.map(t => {
-      if (t.id === id) {
-          const newStart = Math.min(start, t.trimEnd - 0.1);
-          return { ...t, trimStart: newStart };
-      }
-      return t;
-    }));
-    this.syncBackgroundAudio();
+    this.backgroundAudio.setTrackTrimStart(id, start, () => this.syncBackgroundAudio());
   }
 
   setTrackTrimEnd(id: string, end: number) {
-    this.audioTracks.update(tracks => tracks.map(t => {
-      if (t.id === id) {
-          const newEnd = Math.max(end, t.trimStart + 0.1);
-          return { ...t, trimEnd: newEnd };
-      }
-      return t;
-    }));
-    this.syncBackgroundAudio();
+    this.backgroundAudio.setTrackTrimEnd(id, end, () => this.syncBackgroundAudio());
   }
 
   previewSpecificTrack(id: string) {
-    if (this.playingTrackId() === id) {
-      this.stopIsolatedPreview();
-      return;
-    }
-
-    this.stopIsolatedPreview();
-
-    if (this.isPlaying()) {
-      this.togglePlay();
-    }
-
-    const track = this.audioTracks().find(t => t.id === id);
-    if (!track) return;
-
-    this.playingTrackId.set(id);
-    this.isolatedPreviewTime.set(track.trimStart);
-    this.isolatedPreviewAudio = new Audio(track.url);
-    this.isolatedPreviewAudio.currentTime = track.trimStart;
-    this.isolatedPreviewAudio.volume = track.volume / 100;
-    this.isolatedPreviewAudio.play().catch(e => console.error(e));
-
-    this.isolatedPreviewInterval = setInterval(() => {
-        if (this.isolatedPreviewAudio) {
-            this.isolatedPreviewTime.set(this.isolatedPreviewAudio.currentTime);
-            if (this.isolatedPreviewAudio.currentTime >= track.trimEnd) {
-                this.stopIsolatedPreview();
-            }
-        }
-    }, 1000 / 30); // ~30fps update
+    this.backgroundAudio.previewSpecificTrack(id, this.isPlaying(), () => this.togglePlay());
   }
 
   stopIsolatedPreview() {
-    if (this.isolatedPreviewAudio) {
-        this.isolatedPreviewAudio.pause();
-        this.isolatedPreviewAudio = null;
-    }
-    if (this.isolatedPreviewInterval) {
-        clearInterval(this.isolatedPreviewInterval);
-        this.isolatedPreviewInterval = null;
-    }
-    this.isolatedPreviewTime.set(0);
-    this.playingTrackId.set(null);
+    this.backgroundAudio.stopIsolatedPreview();
   }
 
   setVideoVolume(val: number) {
@@ -363,14 +256,28 @@ export class App {
     }
   }
 
-  updateTrimStart(val: number) {
-    this.trimStart.set(val);
-    this.checkFormatLimits();
+  saveSegmentState() {
+    this.videoSegmentsService.saveSegmentState();
   }
 
-  updateTrimEnd(val: number) {
-    this.trimEnd.set(val);
-    this.checkFormatLimits();
+  undoSegments() {
+    this.videoSegmentsService.undoSegments(() => this.checkFormatLimits());
+  }
+
+  splitSegmentAtPlayhead() {
+    this.videoSegmentsService.splitSegmentAtPlayhead(this.currentTime(), () => this.checkFormatLimits());
+  }
+
+  deleteSegment(id: string) {
+    this.videoSegmentsService.deleteSegment(id, () => this.checkFormatLimits());
+  }
+
+  updateSegmentStart(id: string, val: number) {
+    this.videoSegmentsService.updateSegmentStart(id, val, () => this.checkFormatLimits());
+  }
+
+  updateSegmentEnd(id: string, val: number) {
+    this.videoSegmentsService.updateSegmentEnd(id, val, () => this.checkFormatLimits());
   }
 
   checkFormatLimits() {
@@ -392,8 +299,12 @@ export class App {
     if (!this.videoEl) return;
     const video = this.videoEl.nativeElement;
     if (video.paused) {
-      if (video.currentTime >= this.trimEnd()) {
-        video.currentTime = this.trimStart();
+      const segments = this.videoSegments();
+      if (segments.length > 0) {
+        const lastSeg = segments[segments.length - 1];
+        if (video.currentTime >= lastSeg.end - 0.1) {
+          video.currentTime = segments[0].start;
+        }
       }
       video.play().then(() => {
         this.isPlaying.set(true);
@@ -406,110 +317,127 @@ export class App {
     }
   }
 
-  seekTo(seconds: number) {
+  seekTo(seconds: number, segmentId?: string) {
     this.stopIsolatedPreview();
     if (!this.videoEl) return;
     const video = this.videoEl.nativeElement;
     const target = Math.max(0, Math.min(this.videoDuration(), seconds));
+    
+    const wasPlaying = this.isPlaying() || !video.paused;
+    
     video.currentTime = target;
     this.currentTime.set(target);
     this.syncBackgroundAudio();
     this.redrawCanvas();
+    
+    if (segmentId) {
+      this.selectedSegmentId.set(segmentId);
+    } else {
+      // Auto select segment containing target seek time
+      const targetSeg = this.videoSegments().find(s => target >= s.start && target <= s.end);
+      if (targetSeg) {
+        this.selectedSegmentId.set(targetSeg.id);
+      }
+    }
+
+    if (wasPlaying) {
+      video.play().then(() => {
+        this.isPlaying.set(true);
+        this.syncBackgroundAudio();
+      }).catch(err => {
+        console.warn('Playback resume failed:', err);
+      });
+    }
   }
 
   cutStartAtCurrentTime() {
     const current = this.currentTime();
-    if (current < this.trimEnd()) {
-      this.updateTrimStart(current);
-      this.seekTo(current);
+    const id = this.selectedSegmentId();
+    if (id) {
+       this.updateSegmentStart(id, current);
+       this.seekTo(current);
     }
   }
 
   cutEndAtCurrentTime() {
     const current = this.currentTime();
-    if (current > this.trimStart()) {
-      this.updateTrimEnd(current);
-      this.seekTo(current);
+    const id = this.selectedSegmentId();
+    if (id) {
+       this.updateSegmentEnd(id, current);
+       this.seekTo(current);
     }
   }
 
   onTimeUpdate() {
     if (this.videoEl) {
       const video = this.videoEl.nativeElement;
-      this.currentTime.set(video.currentTime);
+      if (video.seeking) {
+        return;
+      }
+      const currentOriginal = video.currentTime;
+      
+      const segments = this.videoSegments();
+      if (segments.length === 0) return;
+      
       this.isPlaying.set(!video.paused);
       this.redrawCanvas();
       
-      this.autoScrollTimeline(video.currentTime);
+      // Find current or nearest segment
+      const currentSegIndex = segments.findIndex(s => currentOriginal >= s.start && currentOriginal <= s.end);
       
-      // Auto pause at trim boundary
-      if (video.currentTime >= this.trimEnd()) {
-        video.pause();
-        this.isPlaying.set(false);
+      if (currentSegIndex === -1) {
+        const nextSeg = segments.find(s => s.start > currentOriginal);
+        if (nextSeg) {
+          video.currentTime = nextSeg.start;
+          this.currentTime.set(nextSeg.start);
+          this.selectedSegmentId.set(nextSeg.id);
+          this.syncBackgroundAudio();
+          return;
+        } else {
+          video.pause();
+          this.isPlaying.set(false);
+          const lastSeg = segments[segments.length - 1];
+          video.currentTime = lastSeg.end;
+          this.currentTime.set(lastSeg.end);
+          this.selectedSegmentId.set(lastSeg.id);
+          return;
+        }
       }
+      
+      const currentSeg = segments[currentSegIndex];
+      
+      // Auto transition to start of next segment if we hit the end of the current segment
+      if (currentOriginal >= currentSeg.end - 0.05) {
+        if (currentSegIndex + 1 < segments.length) {
+          const nextSeg = segments[currentSegIndex + 1];
+          video.currentTime = nextSeg.start;
+          this.currentTime.set(nextSeg.start);
+          this.selectedSegmentId.set(nextSeg.id);
+          this.syncBackgroundAudio();
+          return;
+        } else {
+          video.pause();
+          this.isPlaying.set(false);
+          video.currentTime = currentSeg.end;
+          this.currentTime.set(currentSeg.end);
+          this.selectedSegmentId.set(currentSeg.id);
+          return;
+        }
+      }
+      
+      this.currentTime.set(currentOriginal);
+      this.selectedSegmentId.set(currentSeg.id);
+      this.autoScrollTimeline(currentOriginal);
       this.syncBackgroundAudio();
     }
   }
 
   syncBackgroundAudio() {
-    if (this.playingTrackId()) return;
-
-    if (this.audioTracks().length === 0) {
-      if (this.previewAudio) {
-        this.previewAudio.pause();
-      }
-      return;
-    }
-    
-    // Find which track corresponds to the current video time relative to trimStart
-    if (!this.videoEl) return;
-    const videoCurrentTime = this.videoEl.nativeElement.currentTime;
-    const relativeTime = Math.max(0, videoCurrentTime - this.trimStart());
-    
-    let accumulatedTime = 0;
-    let targetTrack = null;
-    let trackLocalTime = 0;
-    
-    for (const track of this.audioTracks()) {
-      const activeDuration = track.trimEnd - track.trimStart;
-      if (relativeTime >= accumulatedTime && relativeTime < accumulatedTime + activeDuration) {
-        targetTrack = track;
-        trackLocalTime = track.trimStart + (relativeTime - accumulatedTime);
-        break;
-      }
-      accumulatedTime += activeDuration;
-    }
-
-    if (!targetTrack) {
-        if (this.previewAudio) {
-           this.previewAudio.pause();
-        }
-        return;
-    }
-
-    if (!this.previewAudio) {
-      this.previewAudio = new Audio();
-    }
-
-    this.previewAudio.volume = targetTrack.volume / 100;
-    
-    if (this.previewAudio.src !== targetTrack.url) {
-      const wasPlaying = !this.previewAudio.paused;
-      this.previewAudio.src = targetTrack.url;
-      this.previewAudio.currentTime = trackLocalTime;
-      if (wasPlaying || (!this.videoEl.nativeElement.paused && videoCurrentTime < this.trimEnd())) {
-         this.previewAudio.play().catch(e => console.warn(e));
-      }
-    } else {
-      if (Math.abs(this.previewAudio.currentTime - trackLocalTime) > 0.15) {
-        this.previewAudio.currentTime = trackLocalTime;
-      }
-      if ((this.videoEl.nativeElement.paused || videoCurrentTime >= this.trimEnd()) && !this.previewAudio.paused) {
-        this.previewAudio.pause();
-      } else if (!this.videoEl.nativeElement.paused && videoCurrentTime < this.trimEnd() && this.previewAudio.paused) {
-        this.previewAudio.play().catch(e => console.warn(e));
-      }
-    }
+    this.backgroundAudio.syncBackgroundAudio(
+      this.videoEl?.nativeElement,
+      this.trimStart(),
+      this.trimEnd()
+    );
   }
 
   autoScrollTimeline(currentTime: number) {
@@ -583,14 +511,25 @@ export class App {
     const targetTime = percentage * this.videoDuration();
     
     const dragType = this.activeDrag();
-    if (dragType === 'start') {
-      const newStart = Math.min(targetTime, this.trimEnd() - 0.1);
-      this.updateTrimStart(Math.max(0, newStart));
-      this.seekTo(this.trimStart());
-    } else if (dragType === 'end') {
-      const newEnd = Math.max(targetTime, this.trimStart() + 0.1);
-      this.updateTrimEnd(Math.min(this.videoDuration(), newEnd));
-      this.seekTo(this.trimEnd());
+    if (dragType === 'start' || dragType === 'end') {
+      const selId = this.selectedSegmentId();
+      const segments = this.videoSegments();
+      const activeSeg = segments.find(s => s.id === selId) || segments[0];
+      if (!activeSeg) return;
+      
+      if (dragType === 'start') {
+        this.updateSegmentStart(activeSeg.id, targetTime);
+        const updatedSeg = this.videoSegments().find(s => s.id === activeSeg.id);
+        if (updatedSeg) {
+          this.seekTo(updatedSeg.start);
+        }
+      } else {
+        this.updateSegmentEnd(activeSeg.id, targetTime);
+        const updatedSeg = this.videoSegments().find(s => s.id === activeSeg.id);
+        if (updatedSeg) {
+          this.seekTo(updatedSeg.end);
+        }
+      }
     } else if (dragType === 'playhead') {
       this.seekTo(targetTime);
     }
@@ -613,10 +552,12 @@ export class App {
       return;
     }
 
-    this.videoDuration.set(video.duration);
     this.videoWidth.set(video.videoWidth);
     this.videoHeight.set(video.videoHeight);
-    this.trimEnd.set(video.duration);
+    
+    // Initialize starting segment covering full video using our service
+    this.videoSegmentsService.resetSegments(video.duration);
+
     this.checkFormatLimits();
     
     video.volume = Math.max(0, Math.min(1.0, this.volume() / 100));
@@ -625,6 +566,9 @@ export class App {
       this.canvasEl.nativeElement.width = video.videoWidth;
       this.canvasEl.nativeElement.height = video.videoHeight;
       this.ctx = this.canvasEl.nativeElement.getContext('2d', { willReadFrequently: true });
+      if (this.ctx) {
+        this.canvasDrawer.init(this.canvasEl.nativeElement, this.ctx);
+      }
     }
   }
 
@@ -635,109 +579,35 @@ export class App {
   }
 
   redrawCanvas() {
-    if (!this.ctx || !this.canvasEl) return;
-    const canvas = this.canvasEl.nativeElement;
-    this.ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    drawStrokesOnContext(
-      this.ctx,
-      this.strokes(),
-      this.currentTime(),
-      canvas.width,
-      canvas.height,
-      this.videoWidth(),
-      this.videoHeight()
-    );
+    this.canvasDrawer.redrawCanvas(this.videoWidth(), this.videoHeight(), this.currentTime());
   }
 
   onPointerDown(e: MouseEvent | TouchEvent) {
-    if (this.currentTool() === 'pointer' || !this.ctx) return;
-    this.isPointerDown = true;
-    const pos = this.getMousePos(e);
-    this.startPos = pos;
-    this.lastPos = pos;
-    
-    // Create new active stroke
-    const strokeId = 'stroke_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-    this.activeStroke = {
-      id: strokeId,
-      type: this.currentTool() as 'pen' | 'arrow',
-      points: [pos],
-      startPos: pos,
-      endPos: pos,
-      color: this.color(),
-      lineWidth: Math.max(5, this.videoWidth() * 0.005),
-      startTime: this.currentTime(),
-      duration: 3.0 // default 3s as requested
-    };
-    
-    // Auto select this keyframe
-    this.activeStrokeId.set(strokeId);
+    this.canvasDrawer.onPointerDown(e, this.videoWidth(), this.currentTime());
   }
 
   onPointerMove(e: MouseEvent | TouchEvent) {
-    if (!this.isPointerDown || !this.ctx || this.currentTool() === 'pointer' || !this.activeStroke) return;
-    
-    const pos = this.getMousePos(e);
-    
-    if (this.activeStroke.type === 'pen') {
-      this.activeStroke.points.push(pos);
-    } else if (this.activeStroke.type === 'arrow') {
-      this.activeStroke.endPos = pos;
-    }
-    
-    // Live composition render inside drawing phase:
-    // 1. Draw already completed strokes
-    this.redrawCanvas();
-    
-    // 2. Overlay current active live stroke
-    const canvas = this.canvasEl.nativeElement;
-    drawStrokesOnContext(
-      this.ctx,
-      [this.activeStroke],
-      this.currentTime(),
-      canvas.width,
-      canvas.height,
-      this.videoWidth(),
-      this.videoHeight()
-    );
+    this.canvasDrawer.onPointerMove(e, this.currentTime(), this.videoWidth(), this.videoHeight());
   }
 
   onPointerUp() {
-    if (this.isPointerDown && this.activeStroke) {
-      this.strokes.update(s => [...s, this.activeStroke!]);
-      this.activeStroke = null;
-      this.redrawCanvas();
-    }
-    this.isPointerDown = false;
+    this.canvasDrawer.onPointerUp(this.videoWidth(), this.videoHeight(), this.currentTime());
   }
   
   clearCanvas() {
-    this.strokes.set([]);
-    this.activeStrokeId.set(null);
-    if (this.ctx && this.canvasEl) {
-      this.ctx.clearRect(0, 0, this.canvasEl.nativeElement.width, this.canvasEl.nativeElement.height);
-    }
+    this.canvasDrawer.clearCanvas();
   }
 
   deleteStroke(id: string) {
-    this.strokes.update(all => all.filter(s => s.id !== id));
-    if (this.activeStrokeId() === id) {
-      this.activeStrokeId.set(null);
-    }
-    this.redrawCanvas();
+    this.canvasDrawer.deleteStroke(id, this.videoWidth(), this.videoHeight(), this.currentTime());
   }
 
   updateStrokeStartTime(id: string, newTime: number) {
-    const validTime = Math.max(0, Math.min(this.videoDuration(), Number(newTime)));
-    this.strokes.update(all => all.map(s => s.id === id ? { ...s, startTime: validTime } : s));
-    this.redrawCanvas();
+    this.canvasDrawer.updateStrokeStartTime(id, newTime, this.videoDuration(), this.videoWidth(), this.videoHeight(), this.currentTime());
   }
 
   updateStrokeDuration(id: string, newDuration: number) {
-    const validDur = Math.max(0.1, Number(newDuration));
-    this.strokes.update(all => all.map(s => s.id === id ? { ...s, duration: validDur } : s));
-    this.redrawCanvas();
+    this.canvasDrawer.updateStrokeDuration(id, newDuration, this.videoWidth(), this.videoHeight(), this.currentTime());
   }
 
   // --- Rendering logic ---
@@ -753,8 +623,7 @@ export class App {
       videoWidth: this.videoWidth(),
       videoHeight: this.videoHeight(),
       videoDuration: this.videoDuration(),
-      trimStart: this.trimStart(),
-      trimEnd: this.trimEnd(),
+      videoSegments: this.videoSegments(),
       volume: this.volume(),
       outputFormat: this.outputFormat(),
       videoFile: this.videoFile(),
