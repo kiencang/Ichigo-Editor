@@ -9,10 +9,10 @@ import { ZoomRegion } from './zoom.types';
   standalone: true,
   imports: [CommonModule, FormsModule, MatIconModule, DecimalPipe],
   template: `
-    <div class="p-5 rounded-2xl bg-neutral-900 border border-white/5 flex flex-col gap-4">
+    <div class="p-4 rounded-2xl bg-neutral-900 border border-white/5 flex flex-col gap-4">
       <div class="border-b border-white/10 pb-3 flex flex-col gap-3">
-        <span class="text-xs font-semibold text-neutral-300 tracking-wider flex items-center gap-2">
-          <mat-icon class="text-emerald-400" style="font-size: 16px; width: 16px; height: 16px;">zoom_in</mat-icon>
+        <span class="text-lg font-medium text-neutral-200 flex items-center gap-2">
+          <mat-icon class="text-emerald-400" style="font-size: 22px; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center;">zoom_in</mat-icon>
           {{ lang() === 'vi' ? 'Thu phóng tiêu điểm' : 'Zoom & focus areas' }}
         </span>
         

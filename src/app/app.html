@@ -175,7 +175,8 @@
 
             <div #timelineContainer class="relative h-16 bg-neutral-900 border border-white/5 rounded-xl cursor-ew-resize overflow-visible"
                  (mousedown)="onTimelineMouseDown($event, 'track')"
-                 (touchstart)="onTimelineTouchStart($event, 'track')">
+                 (touchstart)="onTimelineTouchStart($event, 'track')"
+                 (dblclick)="onTrackDoubleClick($event)">
               
               <!-- Waveform Bars Background -->
               <div class="absolute inset-0 flex items-center justify-between px-2 gap-[1px] pointer-events-none">
@@ -212,8 +213,9 @@
                      [class.border-red-500/20]="selectedSegmentId() !== seg.id"
                      [class.ring-2]="selectedSegmentId() === seg.id"
                      [class.ring-red-500/20]="selectedSegmentId() === seg.id"
-                     (mousedown)="$event.stopPropagation(); seekTo(seg.start, seg.id)"
-                     (touchstart)="$event.stopPropagation(); seekTo(seg.start, seg.id)">
+                     (mousedown)="onSegmentMouseDown($event, seg)"
+                     (touchstart)="onSegmentTouchStart($event, seg)"
+                     (dblclick)="onSegmentDoubleClick($event, seg)">
                   
                   <!-- Top label with segment index and duration -->
                   <div class="absolute top-1 left-2 text-[10px] font-mono leading-none flex items-center gap-1 opacity-70"
@@ -687,7 +689,24 @@
       <!-- Settings Sidebar -->
       <div class="col-span-1 lg:col-span-3 flex flex-col gap-6">
         
-        <div class="p-5 rounded-2xl bg-neutral-900 border border-white/5 flex flex-col gap-6">
+        <!-- Zoom & Focus Areas in Right Column Sidebar -->
+        <app-zoom-regions-list
+          [zoomRegions]="zoomRegions()"
+          [activeZoomId]="activeZoomId()"
+          [videoDuration]="videoDuration()"
+          [lang]="lang()"
+          (activeZoomIdSet)="activeZoomId.set($event)"
+          (seekTo)="seekTo($event)"
+          (addZoomRegion)="addZoomRegion()"
+          (deleteZoomRegion)="deleteZoomRegion($event)"
+          (updateZoomStartTime)="updateZoomStartTime($event.id, $event.value)"
+          (updateZoomDuration)="updateZoomDuration($event.id, $event.value)"
+          (updateZoomScale)="updateZoomScale($event.id, $event.value)"
+          (updateZoomPanX)="updateZoomPanX($event.id, $event.value)"
+          (updateZoomPanY)="updateZoomPanY($event.id, $event.value)">
+        </app-zoom-regions-list>
+
+        <div class="p-4 rounded-2xl bg-neutral-900 border border-white/5 flex flex-col gap-6">
           <h3 class="text-lg font-medium flex items-center gap-2">
             <mat-icon class="text-red-500">tune</mat-icon> 
             {{ translations().editorSettings }}
@@ -710,23 +729,6 @@
             (filterSelected)="addAppliedFilter($event)" />
 
         </div>
-
-        <!-- Zoom & Focus Areas in Right Column Sidebar -->
-        <app-zoom-regions-list
-          [zoomRegions]="zoomRegions()"
-          [activeZoomId]="activeZoomId()"
-          [videoDuration]="videoDuration()"
-          [lang]="lang()"
-          (activeZoomIdSet)="activeZoomId.set($event)"
-          (seekTo)="seekTo($event)"
-          (addZoomRegion)="addZoomRegion()"
-          (deleteZoomRegion)="deleteZoomRegion($event)"
-          (updateZoomStartTime)="updateZoomStartTime($event.id, $event.value)"
-          (updateZoomDuration)="updateZoomDuration($event.id, $event.value)"
-          (updateZoomScale)="updateZoomScale($event.id, $event.value)"
-          (updateZoomPanX)="updateZoomPanX($event.id, $event.value)"
-          (updateZoomPanY)="updateZoomPanY($event.id, $event.value)">
-        </app-zoom-regions-list>
 
         <!-- Export Panel -->
         <app-export-panel

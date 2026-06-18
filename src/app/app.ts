@@ -8,6 +8,7 @@ import { WaveformProcessor } from './waveform-processor';
 import { CanvasDrawer } from './canvas-drawer';
 import { ExportProcessor } from './export-processor';
 import { VIDEO_FILTERS, AppliedFilter, getAppliedFiltersCSSAtTime } from './filters.types';
+import { VideoSegment } from './segments';
 import { ZoomRegion, getZoomAtTime } from './zoom.types';
 import { BackgroundAudio } from './background-audio';
 import { BackgroundAudioPanel } from './background-audio-panel';
@@ -628,6 +629,33 @@ export class App {
     } else {
       this.activeDrag.set(target);
     }
+  }
+
+  onSegmentMouseDown(event: MouseEvent, seg: VideoSegment) {
+    event.stopPropagation();
+    event.preventDefault();
+    this.selectedSegmentId.set(seg.id);
+    this.activeDrag.set('playhead');
+    this.handleTimelineDrag(event);
+  }
+
+  onSegmentTouchStart(event: TouchEvent, seg: VideoSegment) {
+    event.stopPropagation();
+    this.selectedSegmentId.set(seg.id);
+    this.activeDrag.set('playhead');
+    this.handleTimelineDrag(event);
+  }
+
+  onSegmentDoubleClick(event: MouseEvent, seg: VideoSegment) {
+    event.stopPropagation();
+    event.preventDefault();
+    this.seekTo(seg.start, seg.id);
+  }
+
+  onTrackDoubleClick(event: MouseEvent) {
+    event.stopPropagation();
+    event.preventDefault();
+    this.seekTo(0);
   }
 
   onGlobalMove(event: MouseEvent | TouchEvent) {

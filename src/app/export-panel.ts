@@ -8,7 +8,7 @@ import { AppTranslations } from './translations';
   template: `
     <div class="flex flex-col gap-6">
       <!-- Export Settings Card -->
-      <div class="p-5 rounded-2xl bg-neutral-900 border border-white/5 flex flex-col gap-6">
+      <div class="p-4 rounded-2xl bg-neutral-900 border border-white/5 flex flex-col gap-6">
         <!-- Volume -->
         <div class="flex flex-col gap-4">
            <div class="flex flex-col gap-2">
