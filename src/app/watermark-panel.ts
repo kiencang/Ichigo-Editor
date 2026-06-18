@@ -11,8 +11,7 @@ import { AppTranslations } from './translations';
   template: `
     <div class="flex flex-col gap-3">
         <div class="flex items-center gap-2">
-          <label for="logo-upload" class="flex-1 flex items-center gap-3 p-3 rounded-xl border border-white/5 hover:border-white/20 bg-neutral-950/50 cursor-pointer transition-colors group">
-             <mat-icon class="text-neutral-500 group-hover:text-red-400 transition-colors">image</mat-icon>
+          <label for="logo-upload" class="flex-1 flex items-center p-3 rounded-xl border border-white/5 hover:border-white/20 bg-neutral-950/50 cursor-pointer transition-colors group">
              <div class="flex-1 overflow-hidden">
                 <div class="text-sm font-medium truncate">{{ logoFile() ? logoFile()!.name : translations().addWatermark }}</div>
              </div>

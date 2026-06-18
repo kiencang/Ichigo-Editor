@@ -13,8 +13,7 @@ import { AppTranslations } from './translations';
       <button (click)="toggleExpand()"
               type="button"
               class="flex items-center justify-between w-full cursor-pointer text-left focus:outline-none group p-3 rounded-xl border border-white/5 hover:border-white/10 bg-neutral-950/50 transition-colors">
-        <div class="flex items-center gap-3">
-          <mat-icon class="text-neutral-500 group-hover:text-red-400 transition-colors" style="font-size: 18px; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center;">movie_filter</mat-icon>
+        <div class="flex items-center">
           <span class="text-sm font-medium text-neutral-300">
             {{ translations().videoFilters }}
           </span>

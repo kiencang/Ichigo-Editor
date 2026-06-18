@@ -189,8 +189,8 @@ export class App {
       startTime: current,
       duration: dur,
       scale: 2.0,
-      panX: 25,
-      panY: 25
+      panX: 0,
+      panY: 0
     };
 
     this.zoomRegions.update(zooms => [...zooms, newZoom]);

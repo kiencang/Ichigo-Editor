@@ -40,13 +40,12 @@ import { ZoomRegion } from './zoom.types';
                    [class.border-white/5]="activeZoomId() !== zoom.id">
                 
                 <!-- Info Left side -->
-                <button type="button" class="flex items-center gap-3 text-left flex-1 cursor-pointer"
+                <button type="button" class="text-left flex-1 cursor-pointer"
                         (click)="onZoomClick(zoom.id, zoom.startTime)">
-                  <mat-icon class="text-neutral-400" style="font-size: 16px; width: 16px; height: 16px; display: flex; align-items: center; justify-content: center;">zoom_in</mat-icon>
                   
                   <div class="flex flex-col gap-0.5">
                     <span class="font-semibold text-neutral-300">
-                      {{ lang() === 'vi' ? 'Thu phóng 2.0x' : 'Zoom 2.0x' }} ({{ getQuadrantLabel(zoom.panX, zoom.panY) }})
+                      {{ lang() === 'vi' ? 'Thu phóng' : 'Zoom' }} {{ zoom.scale }}x ({{ getQuadrantLabel(zoom.panX, zoom.panY) }})
                     </span>
                     <span class="text-[10px] font-mono text-neutral-500">
                       {{ lang() === 'vi' ? 'Kích hoạt' : 'Start' }}: {{ formatTimeShort(zoom.startTime) }} | {{ lang() === 'vi' ? 'Thời lượng' : 'Dur' }}: {{ zoom.duration.toFixed(1) }}s
@@ -138,12 +137,12 @@ import { ZoomRegion } from './zoom.types';
                     <div class="grid grid-cols-2 gap-2.5 w-full bg-neutral-900/60 border border-white/5 rounded-xl p-3 max-w-sm mx-auto">
                       <!-- Top Left Area -->
                       <button type="button" 
-                              (click)="setQuadrant(zoom.id, 25, 25)"
-                              [class.bg-emerald-500/10]="zoom.panX === 25 && zoom.panY === 25"
-                              [class.border-emerald-500/40]="zoom.panX === 25 && zoom.panY === 25"
-                              [class.text-emerald-400]="zoom.panX === 25 && zoom.panY === 25"
-                              [class.border-white/5]="zoom.panX !== 25 || zoom.panY !== 25"
-                              [class.text-neutral-500]="zoom.panX !== 25 || zoom.panY !== 25"
+                              (click)="setQuadrant(zoom.id, 0, 0)"
+                              [class.bg-emerald-500/10]="zoom.panX === 0 && zoom.panY === 0"
+                              [class.border-emerald-500/40]="zoom.panX === 0 && zoom.panY === 0"
+                              [class.text-emerald-400]="zoom.panX === 0 && zoom.panY === 0"
+                              [class.border-white/5]="zoom.panX !== 0 || zoom.panY !== 0"
+                              [class.text-neutral-500]="zoom.panX !== 0 || zoom.panY !== 0"
                               class="border rounded-lg p-3 hover:bg-white/5 hover:text-neutral-300 transition-all cursor-pointer flex flex-col items-center justify-center gap-1.5 h-16">
                         <mat-icon style="font-size: 16px; width: 16px; height: 16px;">north_west</mat-icon>
                         <span class="text-[9px] font-semibold tracking-wide uppercase">{{ lang() === 'vi' ? 'Trên - Trái' : 'Top Left' }}</span>
@@ -151,12 +150,12 @@ import { ZoomRegion } from './zoom.types';
 
                       <!-- Top Right Area -->
                       <button type="button" 
-                              (click)="setQuadrant(zoom.id, 75, 25)"
-                              [class.bg-emerald-500/10]="zoom.panX === 75 && zoom.panY === 25"
-                              [class.border-emerald-500/40]="zoom.panX === 75 && zoom.panY === 25"
-                              [class.text-emerald-400]="zoom.panX === 75 && zoom.panY === 25"
-                              [class.border-white/5]="zoom.panX !== 75 || zoom.panY !== 25"
-                              [class.text-neutral-500]="zoom.panX !== 75 || zoom.panY !== 25"
+                              (click)="setQuadrant(zoom.id, 100, 0)"
+                              [class.bg-emerald-500/10]="zoom.panX === 100 && zoom.panY === 0"
+                              [class.border-emerald-500/40]="zoom.panX === 100 && zoom.panY === 0"
+                              [class.text-emerald-400]="zoom.panX === 100 && zoom.panY === 0"
+                              [class.border-white/5]="zoom.panX !== 100 || zoom.panY !== 0"
+                              [class.text-neutral-500]="zoom.panX !== 100 || zoom.panY !== 0"
                               class="border rounded-lg p-3 hover:bg-white/5 hover:text-neutral-300 transition-all cursor-pointer flex flex-col items-center justify-center gap-1.5 h-16">
                         <mat-icon style="font-size: 16px; width: 16px; height: 16px;">north_east</mat-icon>
                         <span class="text-[9px] font-semibold tracking-wide uppercase">{{ lang() === 'vi' ? 'Trên - Phải' : 'Top Right' }}</span>
@@ -164,12 +163,12 @@ import { ZoomRegion } from './zoom.types';
 
                       <!-- Bottom Left Area -->
                       <button type="button" 
-                              (click)="setQuadrant(zoom.id, 25, 75)"
-                              [class.bg-emerald-500/10]="zoom.panX === 25 && zoom.panY === 75"
-                              [class.border-emerald-500/40]="zoom.panX === 25 && zoom.panY === 75"
-                              [class.text-emerald-400]="zoom.panX === 25 && zoom.panY === 75"
-                              [class.border-white/5]="zoom.panX !== 25 || zoom.panY !== 75"
-                              [class.text-neutral-500]="zoom.panX !== 25 || zoom.panY !== 75"
+                              (click)="setQuadrant(zoom.id, 0, 100)"
+                              [class.bg-emerald-500/10]="zoom.panX === 0 && zoom.panY === 100"
+                              [class.border-emerald-500/40]="zoom.panX === 0 && zoom.panY === 100"
+                              [class.text-emerald-400]="zoom.panX === 0 && zoom.panY === 100"
+                              [class.border-white/5]="zoom.panX !== 0 || zoom.panY !== 100"
+                              [class.text-neutral-500]="zoom.panX !== 0 || zoom.panY !== 100"
                               class="border rounded-lg p-3 hover:bg-white/5 hover:text-neutral-300 transition-all cursor-pointer flex flex-col items-center justify-center gap-1.5 h-16">
                         <mat-icon style="font-size: 16px; width: 16px; height: 16px;">south_west</mat-icon>
                         <span class="text-[9px] font-semibold tracking-wide uppercase">{{ lang() === 'vi' ? 'Dưới - Trái' : 'Btm Left' }}</span>
@@ -177,12 +176,12 @@ import { ZoomRegion } from './zoom.types';
 
                       <!-- Bottom Right Area -->
                       <button type="button" 
-                              (click)="setQuadrant(zoom.id, 75, 75)"
-                              [class.bg-emerald-500/10]="zoom.panX === 75 && zoom.panY === 75"
-                              [class.border-emerald-500/40]="zoom.panX === 75 && zoom.panY === 75"
-                              [class.text-emerald-400]="zoom.panX === 75 && zoom.panY === 75"
-                              [class.border-white/5]="zoom.panX !== 75 || zoom.panY !== 75"
-                              [class.text-neutral-500]="zoom.panX !== 75 || zoom.panY !== 75"
+                              (click)="setQuadrant(zoom.id, 100, 100)"
+                              [class.bg-emerald-500/10]="zoom.panX === 100 && zoom.panY === 100"
+                              [class.border-emerald-500/40]="zoom.panX === 100 && zoom.panY === 100"
+                              [class.text-emerald-400]="zoom.panX === 100 && zoom.panY === 100"
+                              [class.border-white/5]="zoom.panX !== 100 || zoom.panY !== 100"
+                              [class.text-neutral-500]="zoom.panX !== 100 || zoom.panY !== 100"
                               class="border rounded-lg p-3 hover:bg-white/5 hover:text-neutral-300 transition-all cursor-pointer flex flex-col items-center justify-center gap-1.5 h-16">
                         <mat-icon style="font-size: 16px; width: 16px; height: 16px;">south_east</mat-icon>
                         <span class="text-[9px] font-semibold tracking-wide uppercase">{{ lang() === 'vi' ? 'Dưới - Phải' : 'Btm Right' }}</span>
@@ -241,10 +240,10 @@ export class AppZoomRegionsList {
 
   getQuadrantLabel(panX: number, panY: number): string {
     const isVi = this.lang() === 'vi';
-    if (panX === 25 && panY === 25) return isVi ? 'Trên - Trái' : 'Top Left';
-    if (panX === 75 && panY === 25) return isVi ? 'Trên - Phải' : 'Top Right';
-    if (panX === 25 && panY === 75) return isVi ? 'Dưới - Trái' : 'Btm Left';
-    if (panX === 75 && panY === 75) return isVi ? 'Dưới - Phải' : 'Btm Right';
+    if (panX === 0 && panY === 0) return isVi ? 'Trên - Trái' : 'Top Left';
+    if (panX === 100 && panY === 0) return isVi ? 'Trên - Phải' : 'Top Right';
+    if (panX === 0 && panY === 100) return isVi ? 'Dưới - Trái' : 'Btm Left';
+    if (panX === 100 && panY === 100) return isVi ? 'Dưới - Phải' : 'Btm Right';
     return isVi ? 'Trung tâm' : 'Center';
   }
 
