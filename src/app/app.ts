@@ -328,7 +328,7 @@ export class App {
   isExtractingWaveform = signal<boolean>(false);
 
   @ViewChild("videoEl") videoEl!: ElementRef<HTMLVideoElement>;
-  @ViewChild("canvasEl") canvasEl!: ElementRef<HTMLCanvasElement>;
+  @ViewChild("canvasEl") canvasEl!: ElementRef<HTMLDivElement>;
   @ViewChild("timelineContainer")
   timelineContainer!: ElementRef<HTMLDivElement>;
 
@@ -808,14 +808,7 @@ export class App {
     video.volume = Math.max(0, Math.min(1.0, this.volume() / 100));
 
     if (this.canvasEl) {
-      this.canvasEl.nativeElement.width = video.videoWidth;
-      this.canvasEl.nativeElement.height = video.videoHeight;
-      this.ctx = this.canvasEl.nativeElement.getContext("2d", {
-        willReadFrequently: true,
-      });
-      if (this.ctx) {
-        this.canvasDrawer.init(this.canvasEl.nativeElement, this.ctx);
-      }
+      this.canvasDrawer.init(this.canvasEl.nativeElement);
     }
   }
 
@@ -937,7 +930,7 @@ export class App {
   async exportVideo() {
     if (!this.isLoaded() || !this.videoFile() || !this.videoUrl()) return;
     await this.exportOrchestratorService.exportVideo(
-      this.canvasEl.nativeElement,
+      this.canvasDrawer.getCanvasElement() || document.createElement("canvas"),
       this.introSettings(),
       this.translations(),
     );
@@ -948,15 +941,13 @@ export class App {
   }
 
   downloadCanvas() {
-    this.canvasEl.nativeElement.toBlob((blob) => {
-      if (!blob) return;
-      const url = URL.createObjectURL(blob);
+    const dataUrl = this.canvasDrawer.getStageDataUrl();
+    if (dataUrl) {
       const a = document.createElement("a");
-      a.href = url;
+      a.href = dataUrl;
       a.download = "annotation.png";
       a.click();
-      URL.revokeObjectURL(url);
-    });
+    }
   }
 
   extractAudioWaveform(file: File) {
