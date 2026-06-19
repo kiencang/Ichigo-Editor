@@ -10,7 +10,6 @@ import {
 } from "@angular/core";
 import { FormsModule } from "@angular/forms";
 import { MatIconModule } from "@angular/material/icon";
-import { DecimalPipe } from "@angular/common";
 import { getTranslations } from "./translations";
 import { TimeFormatter } from "./time-formatter";
 import { WaveformProcessor } from "./waveform-processor";
@@ -38,6 +37,10 @@ import { AppAppliedFiltersList } from "./applied-filters-list";
 import { AppZoomRegionsList } from "./zoom-regions-list";
 import { IntroPanelComponent } from "./intro-panel";
 import { IntroSettings, DEFAULT_INTRO_SETTINGS } from "./intro.types";
+import { AnnotationToolsComponent } from "./annotation-tools";
+import { ZoomRegionsService } from "./zoom-regions.service";
+import { VideoFiltersService } from "./video-filters.service";
+import { EditorStateService } from "./editor-state.service";
 
 @Component({
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -45,11 +48,9 @@ import { IntroSettings, DEFAULT_INTRO_SETTINGS } from "./intro.types";
   imports: [
     FormsModule,
     MatIconModule,
-    DecimalPipe,
     VideoFilters,
     ExportPanel,
     WatermarkPanel,
-    StrokePropertiesPanel,
     AppHeader,
     AppFooter,
     UploadPanel,
@@ -58,6 +59,7 @@ import { IntroSettings, DEFAULT_INTRO_SETTINGS } from "./intro.types";
     AppZoomRegionsList,
     BackgroundAudioPanel,
     IntroPanelComponent,
+    AnnotationToolsComponent,
   ],
   templateUrl: "./app.html",
   styleUrl: "./app.css",
@@ -69,293 +71,39 @@ export class App {
   readonly backgroundAudio = inject(BackgroundAudio);
   readonly videoSegmentsService = inject(VideoSegments);
 
+  // --- Editor Core State ---
+  private editorState = inject(EditorStateService);
+
   introSettings = signal<IntroSettings>(DEFAULT_INTRO_SETTINGS);
   introPreviewTimestamp = signal<number | null>(null);
 
-  lang = signal<"vi" | "en">("vi");
+  lang = this.editorState.lang;
+  logs = this.editorState.logs;
 
-  setLang(l: "vi" | "en") {
-    this.lang.set(l);
-  }
-
-  translations = computed(() => {
-    return getTranslations(this.lang());
-  });
-
-  isLoaded = signal(false);
-  isLoading = signal(false);
-  isProcessing = signal(false);
-  progress = signal(0);
-  logs = signal<string[]>([]);
-  errorMessage = signal<string | null>(null);
-
-  videoFile = signal<File | null>(null);
-  videoUrl = signal<string | null>(null);
+  videoFile = this.editorState.videoFile;
+  videoUrl = this.editorState.videoUrl;
+  isVideoLoaded = this.editorState.isVideoLoaded;
   videoDuration = this.videoSegmentsService.videoDuration;
-  videoWidth = signal(0);
-  videoHeight = signal(0);
+  videoWidth = this.editorState.videoWidth;
+  videoHeight = this.editorState.videoHeight;
 
-  videoSegments = this.videoSegmentsService.videoSegments;
-  selectedSegmentId = this.videoSegmentsService.selectedSegmentId;
-  segmentHistoryList = this.videoSegmentsService.segmentHistoryList;
+  currentTime = this.editorState.currentTime;
+  isPlaying = this.editorState.isPlaying;
 
-  trimStart = this.videoSegmentsService.trimStart;
-  trimEnd = this.videoSegmentsService.trimEnd;
-  selectedSegmentStart = this.videoSegmentsService.selectedSegmentStart;
-  selectedSegmentEnd = this.videoSegmentsService.selectedSegmentEnd;
-  trimmedDuration = this.videoSegmentsService.trimmedDuration;
-  selectedSegmentIndex = this.videoSegmentsService.selectedSegmentIndex;
-  canUndo = this.videoSegmentsService.canUndo;
-  isGifDisabled = this.videoSegmentsService.isGifDisabled;
-  volume = signal<number>(100);
-  outputFormat = signal<string>("webm");
-  audioBitrate = signal<number>(192000);
-  videoBitrate = signal<number>(0); // 0 = Auto, other values are explicit bps: 2000000, 4000000, 8000000
+  timelineZoom = this.editorState.timelineZoom;
+  activeDrag = this.editorState.activeDrag;
 
-  videoFiltersList = VIDEO_FILTERS;
-  appliedFilters = signal<AppliedFilter[]>([]);
-  activeFilterId = signal<string | null>(null);
+  volume = this.editorState.volume;
+  outputFormat = this.editorState.outputFormat;
+  audioBitrate = this.editorState.audioBitrate;
+  videoBitrate = this.editorState.videoBitrate;
+  outputUrl = this.editorState.outputUrl;
 
-  currentActiveFilter = computed(() => {
-    return (
-      this.appliedFilters().find((f) => f.id === this.activeFilterId()) || null
-    );
-  });
-
-  getVideoFilterStyle() {
-    return getAppliedFiltersCSSAtTime(
-      this.appliedFilters(),
-      this.currentTime(),
-    );
-  }
-
-  addAppliedFilter(presetId: string) {
-    if (!this.videoUrl()) return;
-    const current = this.currentTime();
-    const videoDur = this.videoDuration();
-    if (videoDur <= 0) return;
-    const dur = Math.min(3, Math.max(0.1, videoDur - current));
-    if (dur <= 0) return;
-
-    const newFilter: AppliedFilter = {
-      id: "filter_" + Math.random().toString(36).substring(2, 11),
-      presetId: presetId,
-      startTime: current,
-      duration: dur,
-      intensity: 100,
-    };
-
-    this.appliedFilters.update((filters) => [...filters, newFilter]);
-    this.activeFilterId.set(newFilter.id);
-    this.logs.update((l) => [
-      ...l,
-      this.lang() === "vi"
-        ? `[Bộ lọc] Đã thêm bộ lọc ${presetId} tại ${current.toFixed(2)}s hiển thị trong ${dur.toFixed(1)}s`
-        : `[Filter] Added ${presetId} filter at ${current.toFixed(2)}s for ${dur.toFixed(1)}s`,
-    ]);
-  }
-
-  deleteAppliedFilter(id: string) {
-    this.appliedFilters.update((all) => all.filter((f) => f.id !== id));
-    if (this.activeFilterId() === id) {
-      this.activeFilterId.set(null);
-    }
-  }
-
-  updateFilterStartTime(id: string, newTime: number) {
-    const validTime = Math.max(
-      0,
-      Math.min(this.videoDuration(), Number(newTime)),
-    );
-    this.appliedFilters.update((all) =>
-      all.map((f) => (f.id === id ? { ...f, startTime: validTime } : f)),
-    );
-  }
-
-  updateFilterDuration(id: string, newDuration: number) {
-    const validDur = Math.max(
-      0.1,
-      Math.min(this.videoDuration(), Number(newDuration)),
-    );
-    this.appliedFilters.update((all) =>
-      all.map((f) => (f.id === id ? { ...f, duration: validDur } : f)),
-    );
-  }
-
-  updateFilterIntensity(id: string, intensity: number) {
-    const validIntensity = Math.max(10, Math.min(100, Number(intensity)));
-    this.appliedFilters.update((all) =>
-      all.map((f) => (f.id === id ? { ...f, intensity: validIntensity } : f)),
-    );
-  }
-
-  getFilterPresetName(presetId: string): string {
-    const preset = this.videoFiltersList.find((f) => f.id === presetId);
-    if (!preset) return presetId;
-    return this.lang() === "vi" ? preset.nameVi : preset.nameEn;
-  }
-
-  getStrokeTypeName(type: string): string {
-    const isVi = this.lang() === "vi";
-    switch (type) {
-      case "pen":
-        return isVi ? "Nét vẽ tự do" : "Freehand Draw";
-      case "arrow":
-        return isVi ? "Mũi tên chỉ hướng" : "Directional Arrow";
-      case "rect":
-        return isVi ? "Hình chữ nhật" : "Rectangle";
-      case "circle":
-        return isVi ? "Hình tròn" : "Circle";
-      case "line":
-        return isVi ? "Đường thẳng" : "Straight Line";
-      default:
-        return type;
-    }
-  }
-
-  zoomRegions = signal<ZoomRegion[]>([]);
-  activeZoomId = signal<string | null>(null);
-
-  currentActiveZoom = computed(() => {
-    return this.zoomRegions().find((z) => z.id === this.activeZoomId()) || null;
-  });
-
-  currentZoomState = computed(() => {
-    return getZoomAtTime(this.zoomRegions(), this.currentTime());
-  });
-
-  getZoomTransformStyle() {
-    const state = this.currentZoomState();
-    return `scale(${state.scale})`;
-  }
-
-  getZoomOriginStyle() {
-    const state = this.currentZoomState();
-    return `${state.panX}% ${state.panY}%`;
-  }
-
-  addZoomRegion() {
-    if (!this.videoUrl()) return;
-    const current = this.currentTime();
-    const videoDur = this.videoDuration();
-    if (videoDur <= 0) return;
-    const dur = Math.min(3, Math.max(0.1, videoDur - current));
-    if (dur <= 0) return;
-
-    const newZoom: ZoomRegion = {
-      id: "zoom_" + Math.random().toString(36).substring(2, 11),
-      startTime: current,
-      duration: dur,
-      scale: 2.0,
-      panX: 0,
-      panY: 0,
-    };
-
-    this.zoomRegions.update((zooms) => [...zooms, newZoom]);
-    this.activeZoomId.set(newZoom.id);
-    this.logs.update((l) => [
-      ...l,
-      this.lang() === "vi"
-        ? `[Thu phóng] Đã thêm vùng thu phóng 2.0x tại ${current.toFixed(2)}s hiển thị trong ${dur.toFixed(1)}s`
-        : `[Zoom & Pan] Added 2.0x zoom region at ${current.toFixed(2)}s for ${dur.toFixed(1)}s`,
-    ]);
-  }
-
-  deleteZoomRegion(id: string) {
-    this.zoomRegions.update((all) => all.filter((z) => z.id !== id));
-    if (this.activeZoomId() === id) {
-      this.activeZoomId.set(null);
-    }
-  }
-
-  updateZoomStartTime(id: string, newTime: number) {
-    const validTime = Math.max(
-      0,
-      Math.min(this.videoDuration(), Number(newTime)),
-    );
-    this.zoomRegions.update((all) =>
-      all.map((z) => (z.id === id ? { ...z, startTime: validTime } : z)),
-    );
-  }
-
-  updateZoomDuration(id: string, newDuration: number) {
-    const validDur = Math.max(
-      0.1,
-      Math.min(this.videoDuration(), Number(newDuration)),
-    );
-    this.zoomRegions.update((all) =>
-      all.map((z) => (z.id === id ? { ...z, duration: validDur } : z)),
-    );
-  }
-
-  updateZoomScale(id: string, newScale: number) {
-    const validScale = Math.max(1.0, Math.min(4.0, Number(newScale)));
-    this.zoomRegions.update((all) =>
-      all.map((z) => (z.id === id ? { ...z, scale: validScale } : z)),
-    );
-  }
-
-  updateZoomPanX(id: string, newPanX: number) {
-    const validX = Math.max(0, Math.min(100, Number(newPanX)));
-    this.zoomRegions.update((all) =>
-      all.map((z) => (z.id === id ? { ...z, panX: validX } : z)),
-    );
-  }
-
-  updateZoomPanY(id: string, newPanY: number) {
-    const validY = Math.max(0, Math.min(100, Number(newPanY)));
-    this.zoomRegions.update((all) =>
-      all.map((z) => (z.id === id ? { ...z, panY: validY } : z)),
-    );
-  }
-
-  getZoomQuadrantIcon(panX: number, panY: number): string {
-    if (panX === 25 && panY === 25) return "north_west";
-    if (panX === 75 && panY === 25) return "north_east";
-    if (panX === 25 && panY === 75) return "south_west";
-    if (panX === 75 && panY === 75) return "south_east";
-    return "zoom_in";
-  }
-
-  getZoomQuadrantLabelShort(panX: number, panY: number): string {
-    const isVi = this.lang() === "vi";
-    if (panX === 25 && panY === 25) return isVi ? "Trên - Trái" : "Top Left";
-    if (panX === 75 && panY === 25) return isVi ? "Trên - Phải" : "Top Right";
-    if (panX === 25 && panY === 75) return isVi ? "Dưới - Trái" : "Btm Left";
-    if (panX === 75 && panY === 75) return isVi ? "Dưới - Phải" : "Btm Right";
-    return isVi ? "Trung tâm" : "Center";
-  }
-
-  audioTracks = this.backgroundAudio.audioTracks;
-  isExtractingBgWaveform = this.backgroundAudio.isExtractingBgWaveform;
-  logoFile = signal<File | null>(null);
-  logoPreviewUrl = signal<string | null>(null);
-  logoPosition = signal<
-    "top-left" | "top-right" | "bottom-left" | "bottom-right"
-  >("top-right");
-  logoOpacity = signal<number>(50);
-  logoSize = signal<number>(15);
-  playingTrackId = this.backgroundAudio.playingTrackId;
-  isolatedPreviewTime = this.backgroundAudio.isolatedPreviewTime;
-
-  currentTool = this.canvasDrawer.currentTool;
-  color = this.canvasDrawer.color;
-  strokes = this.canvasDrawer.strokes;
-  activeStrokeId = this.canvasDrawer.activeStrokeId;
-  currentActiveStroke = this.canvasDrawer.currentActiveStroke;
-
-  outputUrl = signal<string | null>(null);
-
-  timelineZoom = signal<number>(1);
-  @ViewChild("timelineScrollContainer")
-  timelineScrollContainer!: ElementRef<HTMLDivElement>;
-
-  currentTime = signal<number>(0);
-  isPlaying = signal<boolean>(false);
-  activeDrag = signal<"start" | "end" | "playhead" | null>(null);
-
-  waveform = signal<number[]>([]);
-  isExtractingWaveform = signal<boolean>(false);
+  logoFile = this.editorState.logoFile;
+  logoPreviewUrl = this.editorState.logoPreviewUrl;
+  logoPosition = this.editorState.logoPosition;
+  logoOpacity = this.editorState.logoOpacity;
+  logoSize = this.editorState.logoSize;
 
   rulerTicks = computed(() => {
     const duration = this.videoDuration();
@@ -378,6 +126,213 @@ export class App {
     }
     return ticks;
   });
+
+  setLang(l: "vi" | "en") {
+    this.editorState.lang.set(l);
+  }
+
+  translations = computed(() => {
+    return getTranslations(this.lang());
+  });
+
+  isLoaded = signal(false);
+  isLoading = signal(false);
+  isProcessing = signal(false);
+  progress = signal(0);
+  errorMessage = signal<string | null>(null);
+
+  private zoomRegionsService = inject(ZoomRegionsService);
+  private videoFiltersService = inject(VideoFiltersService);
+
+  // --- External states ---
+  videoSegments = this.videoSegmentsService.videoSegments;
+  selectedSegmentId = this.videoSegmentsService.selectedSegmentId;
+  segmentHistoryList = this.videoSegmentsService.segmentHistoryList;
+
+  trimStart = this.videoSegmentsService.trimStart;
+  trimEnd = this.videoSegmentsService.trimEnd;
+  selectedSegmentStart = this.videoSegmentsService.selectedSegmentStart;
+  selectedSegmentEnd = this.videoSegmentsService.selectedSegmentEnd;
+  trimmedDuration = this.videoSegmentsService.trimmedDuration;
+  selectedSegmentIndex = this.videoSegmentsService.selectedSegmentIndex;
+  canUndo = this.videoSegmentsService.canUndo;
+  isGifDisabled = this.videoSegmentsService.isGifDisabled;
+
+  // --- Zoom States ---
+  zoomRegions = this.zoomRegionsService.zoomRegions;
+  activeZoomId = this.zoomRegionsService.activeZoomId;
+  currentActiveZoom = this.zoomRegionsService.currentActiveZoom;
+
+  currentZoomState = computed(() => {
+    return this.zoomRegionsService.currentZoomState(this.currentTime());
+  });
+
+  getZoomTransformStyle() {
+    const state = this.currentZoomState();
+    return `scale(${state.scale})`;
+  }
+
+  getZoomOriginStyle() {
+    const state = this.currentZoomState();
+    return `${state.panX}% ${state.panY}%`;
+  }
+
+  addZoomRegion() {
+    if (!this.videoUrl()) return;
+    const dur = this.videoDuration();
+    const current = this.currentTime();
+    const newZoom = this.zoomRegionsService.addZoomRegion(current, dur);
+    if (newZoom) {
+      this.logs.update((l) => [
+        ...l,
+        this.lang() === "vi"
+          ? `[Thu phóng] Đã thêm vùng thu phóng 2.0x tại ${current.toFixed(2)}s hiển thị trong ${newZoom.duration.toFixed(1)}s`
+          : `[Zoom & Pan] Added 2.0x zoom region at ${current.toFixed(2)}s for ${newZoom.duration.toFixed(1)}s`,
+      ]);
+    }
+  }
+
+  deleteZoomRegion(id: string) {
+    this.zoomRegionsService.deleteZoomRegion(id);
+  }
+
+  updateZoomStartTime(id: string, newTime: number) {
+    this.zoomRegionsService.updateZoomStartTime(
+      id,
+      newTime,
+      this.videoDuration(),
+    );
+  }
+
+  updateZoomDuration(id: string, newDuration: number) {
+    this.zoomRegionsService.updateZoomDuration(
+      id,
+      newDuration,
+      this.videoDuration(),
+    );
+  }
+
+  updateZoomScale(id: string, newScale: number) {
+    this.zoomRegionsService.updateZoomScale(id, newScale);
+  }
+
+  updateZoomPanX(id: string, newPanX: number) {
+    this.zoomRegionsService.updateZoomPanX(id, newPanX);
+  }
+
+  updateZoomPanY(id: string, newPanY: number) {
+    this.zoomRegionsService.updateZoomPanY(id, newPanY);
+  }
+
+  getZoomQuadrantIcon(panX: number, panY: number): string {
+    if (panX === 25 && panY === 25) return "north_west";
+    if (panX === 75 && panY === 25) return "north_east";
+    if (panX === 25 && panY === 75) return "south_west";
+    if (panX === 75 && panY === 75) return "south_east";
+    return "zoom_in";
+  }
+
+  getZoomQuadrantLabelShort(panX: number, panY: number): string {
+    const isVi = this.lang() === "vi";
+    if (panX === 25 && panY === 25) return isVi ? "Trên - Trái" : "Top Left";
+    if (panX === 75 && panY === 25) return isVi ? "Trên - Phải" : "Top Right";
+    if (panX === 25 && panY === 75) return isVi ? "Dưới - Trái" : "Btm Left";
+    if (panX === 75 && panY === 75) return isVi ? "Dưới - Phải" : "Btm Right";
+    return isVi ? "Trung tâm" : "Center";
+  }
+
+  // --- Filter states ---
+  videoFiltersList = this.videoFiltersService.videoFiltersList;
+  appliedFilters = this.videoFiltersService.appliedFilters;
+  activeFilterId = this.videoFiltersService.activeFilterId;
+  currentActiveFilter = this.videoFiltersService.currentActiveFilter;
+
+  getVideoFilterStyle() {
+    return this.videoFiltersService.getVideoFilterStyle(this.currentTime());
+  }
+
+  addAppliedFilter(presetId: string) {
+    if (!this.videoUrl()) return;
+    const dur = this.videoDuration();
+    const current = this.currentTime();
+    const newFilter = this.videoFiltersService.addAppliedFilter(
+      presetId,
+      current,
+      dur,
+    );
+
+    if (newFilter) {
+      this.logs.update((l) => [
+        ...l,
+        this.lang() === "vi"
+          ? `[Bộ lọc] Đã thêm bộ lọc ${presetId} tại ${current.toFixed(2)}s hiển thị trong ${newFilter.duration.toFixed(1)}s`
+          : `[Filter] Added ${presetId} filter at ${current.toFixed(2)}s for ${newFilter.duration.toFixed(1)}s`,
+      ]);
+    }
+  }
+
+  deleteAppliedFilter(id: string) {
+    this.videoFiltersService.deleteAppliedFilter(id);
+  }
+
+  updateFilterStartTime(id: string, newTime: number) {
+    this.videoFiltersService.updateFilterStartTime(
+      id,
+      newTime,
+      this.videoDuration(),
+    );
+  }
+
+  updateFilterDuration(id: string, newDuration: number) {
+    this.videoFiltersService.updateFilterDuration(
+      id,
+      newDuration,
+      this.videoDuration(),
+    );
+  }
+
+  updateFilterIntensity(id: string, intensity: number) {
+    this.videoFiltersService.updateFilterIntensity(id, intensity);
+  }
+
+  getFilterPresetName(presetId: string): string {
+    return this.videoFiltersService.getFilterPresetName(presetId, this.lang());
+  }
+
+  getStrokeTypeName(type: string): string {
+    const isVi = this.lang() === "vi";
+    switch (type) {
+      case "pen":
+        return isVi ? "Nét vẽ tự do" : "Freehand Draw";
+      case "arrow":
+        return isVi ? "Mũi tên chỉ hướng" : "Directional Arrow";
+      case "rect":
+        return isVi ? "Hình chữ nhật" : "Rectangle";
+      case "circle":
+        return isVi ? "Hình tròn" : "Circle";
+      case "line":
+        return isVi ? "Đường thẳng" : "Straight Line";
+      default:
+        return type;
+    }
+  }
+
+  audioTracks = this.backgroundAudio.audioTracks;
+  isExtractingBgWaveform = this.backgroundAudio.isExtractingBgWaveform;
+  playingTrackId = this.backgroundAudio.playingTrackId;
+  isolatedPreviewTime = this.backgroundAudio.isolatedPreviewTime;
+
+  currentTool = this.canvasDrawer.currentTool;
+  color = this.canvasDrawer.color;
+  strokes = this.canvasDrawer.strokes;
+  activeStrokeId = this.canvasDrawer.activeStrokeId;
+  currentActiveStroke = this.canvasDrawer.currentActiveStroke;
+
+  @ViewChild("timelineScrollContainer")
+  timelineScrollContainer!: ElementRef<HTMLDivElement>;
+
+  waveform = signal<number[]>([]);
+  isExtractingWaveform = signal<boolean>(false);
 
   @ViewChild("videoEl") videoEl!: ElementRef<HTMLVideoElement>;
   @ViewChild("canvasEl") canvasEl!: ElementRef<HTMLCanvasElement>;

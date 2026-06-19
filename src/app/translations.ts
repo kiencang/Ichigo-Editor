@@ -66,8 +66,8 @@ export function getTranslations(lang: 'vi' | 'en'): AppTranslations {
     appName: 'Ichigo Screen Editor',
     selectVideo: isVi ? 'Chọn video để chỉnh sửa' : 'Select a video to edit',
     processDevice: isVi 
-      ? 'Video của bạn được xử lý hoàn toàn trên thiết bị của bạn. Không ghi nhận hoặc gửi bất kỳ dữ liệu nào lên máy chủ.' 
-      : 'Your video is processed entirely on your device. No data is uploaded to any server.',
+      ? 'Video của bạn được xử lý hoàn toàn trên thiết bị của bạn.<br>Chúng tôi không nhận & lưu trữ bất kỳ dữ liệu nào lên máy chủ.' 
+      : 'Your video is processed entirely on your device.<br>No data is uploaded to any server.',
     browseFiles: isVi ? 'Duyệt tệp tin' : 'Browse Files',
     selection: isVi ? 'Vùng chọn:' : 'Selection:',
     exportLength: isVi ? 'Độ dài xuất:' : 'Export duration:',

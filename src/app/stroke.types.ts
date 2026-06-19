@@ -1,3 +1,5 @@
+export type ToolType = 'pointer' | 'pen' | 'arrow' | 'rect' | 'circle' | 'line' | 'text';
+
 export interface StrokePoint {
   x: number;
   y: number;
