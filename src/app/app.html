@@ -1,0 +1,819 @@
+<div
+  class="min-h-screen bg-neutral-900 text-neutral-100 font-sans selection:bg-red-500/30 flex flex-col"
+>
+  <!-- Header -->
+  <app-header [lang]="lang()" (langChanged)="setLang($event)"></app-header>
+
+  <main
+    class="flex-1 max-w-[1440px] w-full mx-auto px-8 py-6"
+    [class.grid]="videoFile()"
+    [class.grid-cols-1]="videoFile()"
+    [class.lg:grid-cols-12]="videoFile()"
+    [class.gap-8]="videoFile()"
+    [class.flex]="!videoFile()"
+    [class.flex-col]="!videoFile()"
+    [class.justify-center]="!videoFile()"
+  >
+    <!-- Error Message Alert -->
+    @if (errorMessage()) {
+    <div
+      class="col-span-full p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-200 flex items-start justify-between gap-3 animate-fade-in"
+    >
+      <div class="flex items-start gap-3">
+        <mat-icon class="text-red-400 shrink-0">error</mat-icon>
+        <div class="text-sm font-medium">{{ errorMessage() }}</div>
+      </div>
+      <button
+        (click)="errorMessage.set(null)"
+        class="text-neutral-400 hover:text-white transition-colors cursor-pointer"
+      >
+        <mat-icon class="text-base">close</mat-icon>
+      </button>
+    </div>
+    }
+
+    <!-- Upload Screen (If no video) -->
+    @if (!videoFile()) {
+    <app-upload-panel
+      [translations]="translations()"
+      (videoSelected)="onVideoSelected($event)"
+    ></app-upload-panel>
+    } @else {
+    <!-- Video Preview and Annotations -->
+    <div class="col-span-1 lg:col-span-9 flex flex-col gap-6">
+      <div
+        class="bg-black rounded-2xl overflow-hidden relative shadow-md ring-1 ring-white/10 flex items-center justify-center mx-auto w-full max-h-[60vh]"
+      >
+        <div
+          class="relative transition-all duration-300 ease-out"
+          [style.transform]="getZoomTransformStyle()"
+          [style.transform-origin]="getZoomOriginStyle()"
+        >
+          <!-- Video element -->
+          <video
+            #videoEl
+            [src]="videoUrl()"
+            crossorigin="anonymous"
+            class="max-w-full max-h-[60vh] block transition-all duration-300 mx-auto"
+            [style.filter]="getVideoFilterStyle()"
+            (loadedmetadata)="onVideoLoadedMetadata($event)"
+            (timeupdate)="onTimeUpdate()"
+            (play)="isPlaying.set(true); syncBackgroundAudio()"
+            (pause)="isPlaying.set(false); syncBackgroundAudio()"
+            (seeking)="onTimeUpdate()"
+            (seeked)="onTimeUpdate()"
+          ></video>
+
+          <!-- Automatic Transition Black Overlay with 0.5s transition comfort (0.25s fade-out, 0.25s fade-in) -->
+          @if (transitionFadeOpacity() > 0) {
+          <div
+            class="absolute inset-0 bg-black pointer-events-none z-[5] transition-opacity duration-75"
+            [style.opacity]="transitionFadeOpacity()"
+          ></div>
+          }
+
+          <!-- Drawing Canvas overlaid exactly on top of video -->
+          <div
+            #canvasEl
+            class="absolute top-0 left-0 w-full h-full cursor-crosshair z-10 touch-none pointer-events-auto"
+            [class.pointer-events-none]="currentTool() === 'pointer' && !activeStrokeId()"
+            (mousedown)="onPointerDown($event)"
+            (mousemove)="onPointerMove($event)"
+            (mouseup)="onPointerUp()"
+            (mouseleave)="onPointerUp()"
+            (touchstart)="onPointerDown($event)"
+            (touchmove)="onPointerMove($event)"
+            (touchend)="onPointerUp()"
+          >
+          </div>
+
+          <!-- Watermark Live Preview Overlay -->
+          @if (logoPreviewUrl()) {
+          <div
+            class="absolute inset-0 p-[3%] z-15 pointer-events-none overflow-hidden select-none flex"
+            [class.justify-start]="logoPosition() === 'top-left' || logoPosition() === 'bottom-left'"
+            [class.justify-end]="logoPosition() === 'top-right' || logoPosition() === 'bottom-right'"
+            [class.items-start]="logoPosition() === 'top-left' || logoPosition() === 'top-right'"
+            [class.items-end]="logoPosition() === 'bottom-left' || logoPosition() === 'bottom-right'"
+          >
+            <img
+              [src]="logoPreviewUrl()"
+              alt="Watermark Preview"
+              [style.opacity]="logoOpacity() / 100"
+              [style.width.%]="logoSize()"
+              class="max-w-[30%] h-auto border border-white/5 shadow-sm rounded-lg"
+              referrerpolicy="no-referrer"
+            />
+          </div>
+          }
+        </div>
+      </div>
+
+      <!-- Modern Custom Video Player Control & Timeline Dock -->
+      <div
+        class="bg-neutral-950/70 border border-white/5 rounded-2xl p-5 flex flex-col gap-4 shadow-sm"
+        (window:mousemove)="onGlobalMove($event)"
+        (window:mouseup)="onGlobalUp()"
+        (window:touchmove)="onGlobalMove($event)"
+        (window:touchend)="onGlobalUp()"
+      >
+        <!-- Top Row: Master playhead state & Quick Action Buttons -->
+        <div class="flex flex-wrap items-center justify-between gap-4">
+          <!-- Left: Play/Pause and Time Status -->
+          <div class="flex items-center gap-3">
+            <button
+              (click)="togglePlay()"
+              class="w-10 h-10 rounded-full flex items-center justify-center bg-red-500 hover:bg-red-600 text-white transition-all shadow-md focus:outline-none focus:ring-2 focus:ring-red-500/30 cursor-pointer"
+            >
+              <mat-icon>{{ isPlaying() ? 'pause' : 'play_arrow' }}</mat-icon>
+            </button>
+
+            <div
+              class="font-mono text-sm text-neutral-300 flex items-center leading-none"
+            >
+              <span class="text-white">{{ formatTime(currentTime()) }}</span>
+              <span class="text-neutral-600 px-1.5">/</span>
+              <span class="text-neutral-400"
+                >{{ formatTime(videoDuration()) }}</span
+              >
+            </div>
+
+            <!-- Split, Delete, Undo segment actions -->
+            <div
+              class="flex items-center gap-1.5 ml-2 border-l border-white/10 pl-3"
+            >
+              <!-- Split button -->
+              <button
+                (click)="splitSegmentAtPlayhead()"
+                class="h-8 px-2.5 rounded-xl bg-neutral-900 border border-white/5 hover:border-red-500/30 hover:bg-red-500/10 text-neutral-300 hover:text-red-400 font-sans text-xs font-semibold flex items-center gap-1 transition-all disabled:opacity-40 disabled:pointer-events-none cursor-pointer"
+                title="Chia đôi phân đoạn tại playhead / Split segment at playhead"
+              >
+                <mat-icon
+                  class="text-xs !flex !items-center !justify-center !leading-none"
+                  style="font-size: 15px; width: 15px; height: 15px"
+                  >content_cut</mat-icon
+                >
+                <span
+                  >{{ lang() === 'vi' ? 'Cắt Phân Đoạn' : 'Split Segment'
+                  }}</span
+                >
+              </button>
+
+              <!-- Delete Segment button -->
+              <button
+                (click)="deleteSegment(selectedSegmentId() || '')"
+                [disabled]="videoSegments().length <= 1"
+                class="h-8 px-2.5 rounded-xl bg-neutral-900 border border-white/5 hover:border-red-500/30 hover:bg-red-500/10 text-neutral-300 hover:text-red-400 font-sans text-xs font-semibold flex items-center gap-1 transition-all disabled:opacity-30 disabled:pointer-events-none cursor-pointer"
+                title="Xóa phân đoạn đang chọn / Delete selected segment"
+              >
+                <mat-icon
+                  class="text-xs !flex !items-center !justify-center !leading-none"
+                  style="font-size: 15px; width: 15px; height: 15px"
+                  >delete</mat-icon
+                >
+                <span
+                  >{{ lang() === 'vi' ? 'Xóa Phân Đoạn' : 'Delete Segment'
+                  }}</span
+                >
+              </button>
+
+              <!-- Undo button -->
+              <button
+                (click)="undoSegments()"
+                [disabled]="!canUndo()"
+                class="h-8 px-2 rounded-xl bg-neutral-900 border border-white/5 hover:border-white/15 hover:bg-neutral-800 text-neutral-400 hover:text-white transition-all disabled:opacity-30 disabled:pointer-events-none cursor-pointer"
+                title="Hoàn tác chỉnh sửa phân đoạn / Undo segmentation"
+              >
+                <mat-icon
+                  class="text-xs !flex !items-center !justify-center !leading-none"
+                  style="font-size: 15px; width: 15px; height: 15px"
+                  >undo</mat-icon
+                >
+              </button>
+            </div>
+          </div>
+
+          <!-- Right: Selection and Export stats -->
+          <div class="flex flex-wrap items-center gap-3">
+            <div
+              class="flex items-center h-8 gap-1.5 bg-neutral-900 px-3 rounded-xl border border-white/5 text-xs text-neutral-300"
+              [title]="lang() === 'vi' ? 'Phân đoạn đang chọn' : 'Currently selected segment'"
+            >
+              <span class="text-neutral-500 leading-none">
+                {{ lang() === 'vi' ? 'Phân đoạn' : 'Segment' }} #{{
+                selectedSegmentIndex() + 1 }}:
+              </span>
+              <span class="text-red-400 font-mono font-semibold leading-none">
+                {{ formatTimeShort(selectedSegmentStart()) }} – {{
+                formatTimeShort(selectedSegmentEnd()) }}
+              </span>
+            </div>
+            <div
+              class="flex items-center h-8 gap-1.5 bg-red-500/10 text-red-400 px-3 rounded-xl border border-red-500/10 text-xs font-semibold"
+            >
+              <mat-icon
+                class="text-red-400 !flex !items-center !justify-center !leading-none"
+                style="font-size: 14px; width: 14px; height: 14px"
+                >timer</mat-icon
+              >
+              <span class="leading-none"
+                >{{ translations().exportLength }}</span
+              >
+              <span class="font-mono font-bold leading-none"
+                >{{ formatTimeShort(trimmedDuration()) }}</span
+              >
+            </div>
+            <div
+              class="flex items-center h-8 gap-2 bg-neutral-900 px-3 rounded-xl border border-white/5 ml-auto text-xs"
+            >
+              <mat-icon
+                class="text-neutral-500"
+                style="font-size: 14px; width: 14px; height: 14px"
+                >zoom_out</mat-icon
+              >
+              <input
+                type="range"
+                [ngModel]="timelineZoom()"
+                (ngModelChange)="timelineZoom.set($event)"
+                [min]="1"
+                [max]="10"
+                step="0.1"
+                class="w-24 h-1 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-red-500"
+                title="Zoom Timeline"
+              />
+              <mat-icon
+                class="text-neutral-500"
+                style="font-size: 14px; width: 14px; height: 14px"
+                >zoom_in</mat-icon
+              >
+            </div>
+          </div>
+        </div>
+
+        <!-- Interactive Timeline Track Area with Ruler -->
+        <div class="flex flex-col gap-1 select-none">
+          <div
+            #timelineScrollContainer
+            class="overflow-x-auto overflow-y-hidden custom-scrollbar pb-3 w-full scroll-smooth"
+          >
+            <div
+              class="flex flex-col gap-1 min-w-full origin-left transition-all relative px-8"
+              [style.min-width.%]="timelineZoom() * 100"
+            >
+              <div
+                #timelineContainer
+                class="relative h-16 bg-neutral-900 border border-white/5 rounded-xl cursor-ew-resize overflow-visible"
+                (mousedown)="onTimelineMouseDown($event, 'track')"
+                (touchstart)="onTimelineTouchStart($event, 'track')"
+                (dblclick)="onTrackDoubleClick($event)"
+              >
+                <!-- Waveform Bars Background -->
+                <div
+                  class="absolute inset-0 flex items-center justify-between px-2 gap-[1px] pointer-events-none"
+                >
+                  @for (amp of waveform(); track $index) {
+                  <div
+                    [style.height.%]="amp * 100"
+                    class="flex-1 min-w-[1px] max-w-[3px] rounded-full transition-all duration-300"
+                    [class.bg-neutral-500/70]="!isBarSelected($index)"
+                    [class.bg-red-500]="isBarSelected($index)"
+                  ></div>
+                  }
+                </div>
+
+                <!-- Loading Indicator Overlay for Waveform -->
+                @if (isExtractingWaveform()) {
+                <div
+                  class="absolute inset-0 flex items-center justify-center bg-neutral-950/80 z-25 rounded-xl pointer-events-none"
+                >
+                  <div class="flex items-center gap-2 text-xs text-neutral-350">
+                    <mat-icon
+                      class="animate-spin text-base !flex !items-center !justify-center !leading-none"
+                      style="font-size: 16px; width: 16px; height: 16px"
+                      >pending</mat-icon
+                    >
+                    <span
+                      class="font-sans font-medium text-neutral-400 select-none"
+                      >{{ lang() === 'vi' ? 'Đang phân tích dạng sóng âm...' :
+                      'Analyzing audio waveform...' }}</span
+                    >
+                  </div>
+                </div>
+                }
+
+                <!-- Dim the entire waveform by default as skipped/gaps -->
+                <div
+                  class="absolute inset-0 bg-neutral-950/80 pointer-events-none rounded-xl"
+                ></div>
+
+                <!-- Active segments rendered as bright glowing zones -->
+                @for (seg of videoSegments(); track seg.id) {
+                <div
+                  class="absolute top-0 bottom-0 border-y cursor-pointer pointer-events-auto transition-all rounded z-20"
+                  [style.left.%]="(seg.start / videoDuration()) * 100"
+                  [style.width.%]="((seg.end - seg.start) / videoDuration()) * 100"
+                  [class.bg-red-500/15]="selectedSegmentId() === seg.id"
+                  [class.bg-red-500/5]="selectedSegmentId() !== seg.id"
+                  [class.border-red-500/60]="selectedSegmentId() === seg.id"
+                  [class.border-red-500/20]="selectedSegmentId() !== seg.id"
+                  [class.ring-2]="selectedSegmentId() === seg.id"
+                  [class.ring-red-500/20]="selectedSegmentId() === seg.id"
+                  (mousedown)="onSegmentMouseDown($event, seg)"
+                  (touchstart)="onSegmentTouchStart($event, seg)"
+                  (dblclick)="onSegmentDoubleClick($event, seg)"
+                >
+                  <!-- Top label with segment index and duration -->
+                  <div
+                    class="absolute top-1 left-2 text-[10px] font-mono leading-none flex items-center gap-1 opacity-70"
+                    [class.text-red-400]="selectedSegmentId() === seg.id"
+                    [class.text-neutral-400]="selectedSegmentId() !== seg.id"
+                  >
+                    <span class="font-bold">#{{ $index + 1 }}</span>
+                    <span>{{ formatTimeShort(seg.end - seg.start) }}</span>
+                  </div>
+                </div>
+                }
+
+                <!-- Ruler Ticks lines in background -->
+                <div class="absolute inset-0 pointer-events-none opacity-20">
+                  @for (tick of rulerTicks(); track tick.time) {
+                  <div
+                    class="absolute top-0 bottom-0 w-[1px] bg-neutral-500 flex flex-col justify-end"
+                    [style.left.%]="tick.percent"
+                  >
+                    <!-- tick mark block -->
+                    <span class="h-2 w-[1px] bg-neutral-400"></span>
+                  </div>
+                  }
+                </div>
+
+                <!-- Visual Annotation Capsules for Stroked Elements -->
+                @for (stroke of strokes(); track stroke.id) {
+                <div
+                  class="absolute bottom-1 h-2 rounded-full cursor-pointer border border-neutral-950/50 hover:scale-y-110 hover:brightness-110 z-20 pointer-events-auto transition-all"
+                  [style.left.%]="(stroke.startTime / videoDuration()) * 100"
+                  [style.width.%]="(stroke.duration / videoDuration()) * 100"
+                  [style.background-color]="stroke.color"
+                  [class.ring-2]="activeStrokeId() === stroke.id"
+                  [class.ring-white]="activeStrokeId() === stroke.id"
+                  [class.opacity-100]="activeStrokeId() === stroke.id"
+                  [class.opacity-60]="activeStrokeId() !== stroke.id"
+                  (mousedown)="$event.stopPropagation(); $event.preventDefault(); activeStrokeId.set(stroke.id); seekTo(stroke.startTime)"
+                  (touchstart)="$event.stopPropagation(); $event.preventDefault(); activeStrokeId.set(stroke.id); seekTo(stroke.startTime)"
+                  title="Annotation"
+                ></div>
+                }
+
+                <!-- CURRENT PLAYHEAD (Yellow or white neon line) -->
+                <div
+                  class="absolute top-0 bottom-0 w-[2px] bg-yellow-400 z-30 pointer-events-none shadow-[0_0_8px_rgba(250,204,21,0.6)]"
+                  [style.left.%]="(currentTime() / videoDuration()) * 100"
+                >
+                  <!-- Playhead top indicator pin -->
+                  <div
+                    class="absolute -top-1 left-1/2 -translate-x-1/2 w-3 h-3 bg-yellow-400 rotate-45 rounded-sm"
+                  ></div>
+                </div>
+
+                <!-- Left Trimmer Handle (Starts at selectedSegmentStart) -->
+                <div
+                  class="absolute top-0 bottom-0 w-5 -ml-2.5 z-40 flex items-center justify-center cursor-ew-resize group pointer-events-auto"
+                  [style.left.%]="(selectedSegmentStart() / videoDuration()) * 100"
+                  (mousedown)="onTimelineMouseDown($event, 'start')"
+                  (touchstart)="onTimelineTouchStart($event, 'start')"
+                >
+                  <div
+                    class="h-full w-2.5 bg-red-500 rounded-l-md border border-neutral-950 shadow-md flex flex-col items-center justify-center gap-0.5 group-hover:bg-red-400 transition-colors"
+                  >
+                    <div class="w-[1px] h-3 bg-white/70"></div>
+                  </div>
+                  <!-- Tooltip showing start time -->
+                  <div
+                    class="absolute -top-8 left-1/2 -translate-x-1/2 px-1.5 py-0.5 bg-red-500 text-neutral-100 text-[10px] rounded font-mono font-medium opacity-0 group-hover:opacity-100 pointer-events-none shadow-md transition-opacity"
+                  >
+                    {{ formatTimeShort(selectedSegmentStart()) }}
+                  </div>
+                </div>
+
+                <!-- Right Trimmer Handle (Ends at selectedSegmentEnd) -->
+                <div
+                  class="absolute top-0 bottom-0 w-5 -ml-2.5 z-40 flex items-center justify-center cursor-ew-resize group pointer-events-auto"
+                  [style.left.%]="(selectedSegmentEnd() / videoDuration()) * 100"
+                  (mousedown)="onTimelineMouseDown($event, 'end')"
+                  (touchstart)="onTimelineTouchStart($event, 'end')"
+                >
+                  <div
+                    class="h-full w-2.5 bg-red-500 rounded-r-md border border-neutral-950 shadow-md flex flex-col items-center justify-center gap-0.5 group-hover:bg-red-400 transition-colors"
+                  >
+                    <div class="w-[1px] h-3 bg-white/70"></div>
+                  </div>
+                  <!-- Tooltip showing end time -->
+                  <div
+                    class="absolute -top-8 left-1/2 -translate-x-1/2 px-1.5 py-0.5 bg-red-500 text-neutral-100 text-[10px] rounded font-mono font-medium opacity-0 group-hover:opacity-100 pointer-events-none shadow-md transition-opacity"
+                  >
+                    {{ formatTimeShort(selectedSegmentEnd()) }}
+                  </div>
+                </div>
+              </div>
+
+              <!-- Zoom Focus Timeline Row -->
+              @if (zoomRegions().length > 0) {
+              <div
+                class="relative h-8 bg-neutral-900/40 border border-white/5 rounded-xl overflow-hidden mt-1 flex items-center"
+              >
+                <div
+                  class="absolute inset-y-0 left-0 flex items-center z-10 text-[9px] text-emerald-500 font-mono pl-3 pointer-events-none opacity-45"
+                >
+                  <mat-icon
+                    style="
+                      font-size: 13px;
+                      width: 13px;
+                      height: 13px;
+                      display: flex;
+                      align-items: center;
+                      justify-content: center;
+                    "
+                    >zoom_in</mat-icon
+                  >
+                  <span class="ml-1 uppercase tracking-wider font-bold"
+                    >{{ lang() === 'vi' ? 'Tiêu điểm (Zoom 2x)' : 'ZOOM FOCUS
+                    2x' }}</span
+                  >
+                </div>
+
+                <div
+                  class="absolute inset-y-0 left-0 right-0 pointer-events-auto flex items-center"
+                >
+                  @for (zoom of zoomRegions(); track zoom.id) {
+                  <div
+                    class="absolute top-1 bottom-1 rounded-lg cursor-pointer border hover:scale-y-105 hover:brightness-110 z-20 transition-all flex items-center gap-1.5 px-2.5 shadow-sm text-[10px]"
+                    [style.left.%]="(zoom.startTime / videoDuration()) * 100"
+                    [style.width.%]="(zoom.duration / videoDuration()) * 100"
+                    [class.bg-emerald-500/25]="activeZoomId() === zoom.id"
+                    [class.border-emerald-500/40]="activeZoomId() === zoom.id"
+                    [class.ring-1]="activeZoomId() === zoom.id"
+                    [class.ring-emerald-400/30]="activeZoomId() === zoom.id"
+                    [class.bg-neutral-800/80]="activeZoomId() !== zoom.id"
+                    [class.border-white/5]="activeZoomId() !== zoom.id"
+                    [class.text-emerald-400]="activeZoomId() === zoom.id"
+                    [class.text-neutral-300]="activeZoomId() !== zoom.id"
+                    (mousedown)="$event.stopPropagation(); activeZoomId.set(zoom.id); seekTo(zoom.startTime)"
+                    (touchstart)="$event.stopPropagation(); activeZoomId.set(zoom.id); seekTo(zoom.startTime)"
+                  >
+                    <mat-icon
+                      style="
+                        font-size: 11px;
+                        width: 11px;
+                        height: 11px;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                      "
+                      class="text-emerald-400 shrink-0"
+                    >
+                      {{ getZoomQuadrantIcon(zoom.panX, zoom.panY) }}
+                    </mat-icon>
+                    <span
+                      class="truncate font-semibold select-none leading-none text-[9px] uppercase tracking-wide"
+                    >
+                      2.0x {{ getZoomQuadrantLabelShort(zoom.panX, zoom.panY) }}
+                    </span>
+                  </div>
+                  }
+                </div>
+              </div>
+              }
+
+              <!-- Background Music Timeline Row -->
+              @if (audioTracks().length > 0 || isExtractingBgWaveform()) {
+              <div
+                class="relative h-10 bg-neutral-900/60 border border-white/5 rounded-xl overflow-hidden mt-1 flex items-center"
+              >
+                <div
+                  class="absolute inset-y-0 left-0 flex items-center z-20 text-[10px] text-emerald-500 font-mono pl-3 pointer-events-none opacity-40"
+                >
+                  <mat-icon style="font-size: 14px; width: 14px; height: 14px"
+                    >music_note</mat-icon
+                  >
+                </div>
+
+                <div class="absolute top-0 bottom-0 left-0 flex">
+                  @for (track of audioTracks(); track track.id) {
+                  <div
+                    class="relative h-full flex flex-col justify-center border-r border-white/10 z-10 overflow-hidden"
+                    [style.width.px]="((track.trimEnd - track.trimStart) / (videoDuration() || 1)) * timelineContainer.clientWidth"
+                  >
+                    <div
+                      class="absolute inset-y-0"
+                      [style.left.px]="-((track.trimStart / track.duration) * ((track.duration / (videoDuration() || 1)) * timelineContainer.clientWidth))"
+                      [style.width.px]="(track.duration / (videoDuration() || 1)) * timelineContainer.clientWidth"
+                    >
+                      <div
+                        class="absolute inset-0 bg-emerald-500/10 pointer-events-none border-x border-emerald-500/20"
+                      ></div>
+                      <div
+                        class="absolute inset-0 flex items-center justify-between px-1 gap-[1px] pointer-events-none"
+                      >
+                        @for (amp of track.waveform; track $index) {
+                        <div
+                          [style.height.%]="amp * 100"
+                          class="flex-1 min-w-[1px] max-w-[3px] rounded-full transition-all duration-300 bg-emerald-500/40"
+                        ></div>
+                        }
+                      </div>
+                    </div>
+                  </div>
+                  }
+                </div>
+
+                <!-- Green Highlighted Trim Range on Bg Audio Waveform as well to show alignment -->
+                <div
+                  class="absolute top-0 bottom-0 bg-emerald-500/5 border-y border-emerald-500/20"
+                  [style.left.%]="(selectedSegmentStart() / videoDuration()) * 100"
+                  [style.width.%]="((selectedSegmentEnd() - selectedSegmentStart()) / videoDuration()) * 100"
+                ></div>
+
+                <!-- Label & Inline interactive volume slider -->
+                <div
+                  class="absolute inset-y-0 left-3 flex items-center gap-2 pointer-events-auto z-10"
+                >
+                  <div
+                    class="flex items-center gap-1 px-2 py-1 rounded-lg bg-neutral-950/85 border border-white/5 shadow-md text-[10px] font-medium text-emerald-400"
+                  >
+                    <mat-icon
+                      class="text-[12px] !flex !items-center !justify-center !leading-none"
+                      style="font-size: 12px; width: 12px; height: 12px"
+                      >music_note</mat-icon
+                    >
+                    <span>{{ translations().bgAudioTrack }}</span>
+                  </div>
+                </div>
+
+                <!-- Loading Indicator Overlay for BG Waveform -->
+                @if (isExtractingBgWaveform()) {
+                <div
+                  class="absolute inset-0 flex items-center justify-center bg-neutral-950/85 z-20"
+                >
+                  <div
+                    class="flex items-center gap-2 text-[11px] text-neutral-350"
+                  >
+                    <mat-icon
+                      class="animate-spin text-sm"
+                      style="font-size: 14px; width: 14px; height: 14px"
+                      >pending</mat-icon
+                    >
+                    <span class="font-sans font-medium text-neutral-400"
+                      >{{ translations().extractingBgWaveform }}</span
+                    >
+                  </div>
+                </div>
+                }
+              </div>
+              }
+
+              <!-- Video Filter Timeline Row -->
+              @if (appliedFilters().length > 0) {
+              <div
+                class="relative h-8 bg-neutral-900/40 border border-white/5 rounded-xl overflow-hidden mt-1 flex items-center"
+              >
+                <!-- Watermark label of the channel -->
+                <div
+                  class="absolute inset-y-0 left-0 flex items-center z-10 text-[9px] text-red-500 font-mono pl-3 pointer-events-none opacity-40"
+                >
+                  <mat-icon
+                    style="
+                      font-size: 13px;
+                      width: 13px;
+                      height: 13px;
+                      display: flex;
+                      align-items: center;
+                      justify-content: center;
+                    "
+                    >movie_filter</mat-icon
+                  >
+                  <span class="ml-1 uppercase tracking-wider font-bold"
+                    >{{ lang() === 'vi' ? 'Bộ lọc màu' : 'COLOR FILTERS'
+                    }}</span
+                  >
+                </div>
+
+                <!-- Applied Filter Capsule segments -->
+                <div
+                  class="absolute inset-y-0 left-0 right-0 pointer-events-auto flex items-center"
+                >
+                  @for (filter of appliedFilters(); track filter.id) {
+                  <div
+                    class="absolute top-1 bottom-1 rounded-lg cursor-pointer border hover:scale-y-105 hover:brightness-110 z-20 transition-all flex items-center px-2.5 shadow-sm text-[10px]"
+                    [style.left.%]="(filter.startTime / videoDuration()) * 100"
+                    [style.width.%]="(filter.duration / videoDuration()) * 100"
+                    [class.bg-red-500/25]="activeFilterId() === filter.id"
+                    [class.border-red-500/40]="activeFilterId() === filter.id"
+                    [class.ring-1]="activeFilterId() === filter.id"
+                    [class.ring-red-400/30]="activeFilterId() === filter.id"
+                    [class.bg-neutral-800/80]="activeFilterId() !== filter.id"
+                    [class.border-white/5]="activeFilterId() !== filter.id"
+                    [class.text-red-400]="activeFilterId() === filter.id"
+                    [class.text-neutral-300]="activeFilterId() !== filter.id"
+                    (mousedown)="$event.stopPropagation(); activeFilterId.set(filter.id); seekTo(filter.startTime)"
+                    (touchstart)="$event.stopPropagation(); activeFilterId.set(filter.id); seekTo(filter.startTime)"
+                    [title]="getFilterPresetName(filter.presetId)"
+                  >
+                    <span
+                      class="truncate font-semibold select-none leading-none"
+                    >
+                      {{ getFilterPresetName(filter.presetId) }}
+                    </span>
+                  </div>
+                  }
+                </div>
+              </div>
+              }
+
+              <!-- Ticks Rulers Timestamps Labels below track -->
+              <div
+                class="relative h-6 mt-1 pointer-events-none overflow-hidden text-[9px] font-mono text-neutral-500 select-none"
+              >
+                @for (tick of rulerTicks(); track tick.time) {
+                <div
+                  class="absolute -translate-x-1/2"
+                  [style.left.%]="tick.percent"
+                >
+                  {{ formatTimeShort(tick.time) }}
+                </div>
+                }
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Annotation Tools -->
+      <app-annotation-tools
+        [translations]="translations()"
+        [(currentTool)]="currentTool"
+        [(color)]="color"
+      ></app-annotation-tools>
+
+      <app-intro-panel
+        [lang]="lang()"
+        [settings]="introSettings()"
+        (settingsChanged)="introSettings.set($event)"
+        (preview)="previewIntro()"
+      >
+      </app-intro-panel>
+
+      <!-- Annotation Timeline & properties panel -->
+      <app-strokes-list
+        [strokes]="strokes()"
+        [activeStrokeId]="activeStrokeId()"
+        [videoDuration]="videoDuration()"
+        [lang]="lang()"
+        [currentActiveStroke]="currentActiveStroke()"
+        (activeStrokeIdSet)="activeStrokeId.set($event)"
+        (seekTo)="seekTo($event)"
+        (deleteStroke)="deleteStroke($event)"
+        (updateStrokeStartTime)="updateStrokeStartTime($event.id, $event.value)"
+        (updateStrokeDuration)="updateStrokeDuration($event.id, $event.value)"
+        (updateStrokeText)="updateStrokeText($event.id, $event.value)"
+        (updateStrokeFontSize)="updateStrokeFontSize($event.id, $event.value)"
+      >
+      </app-strokes-list>
+
+      <!-- Dynamic Zoom & Focus Timeline & properties panel -->
+      <app-zoom-regions-list
+        [zoomRegions]="zoomRegions()"
+        [activeZoomId]="activeZoomId()"
+        [videoDuration]="videoDuration()"
+        [lang]="lang()"
+        (activeZoomIdSet)="activeZoomId.set($event)"
+        (seekTo)="seekTo($event)"
+        (addZoomRegion)="addZoomRegion()"
+        (deleteZoomRegion)="deleteZoomRegion($event)"
+        (updateZoomStartTime)="updateZoomStartTime($event.id, $event.value)"
+        (updateZoomDuration)="updateZoomDuration($event.id, $event.value)"
+        (updateZoomScale)="updateZoomScale($event.id, $event.value)"
+        (updateZoomPanX)="updateZoomPanX($event.id, $event.value)"
+        (updateZoomPanY)="updateZoomPanY($event.id, $event.value)"
+        (preview)="previewZoomRegion($event)"
+      >
+      </app-zoom-regions-list>
+
+      <!-- Video Filter Timeline & properties panel -->
+      <app-applied-filters-list
+        [appliedFilters]="appliedFilters()"
+        [activeFilterId]="activeFilterId()"
+        [videoDuration]="videoDuration()"
+        [lang]="lang()"
+        [translations]="translations()"
+        (activeFilterIdSet)="activeFilterId.set($event)"
+        (seekTo)="seekTo($event)"
+        (deleteAppliedFilter)="deleteAppliedFilter($event)"
+        (updateFilterStartTime)="updateFilterStartTime($event.id, $event.value)"
+        (updateFilterDuration)="updateFilterDuration($event.id, $event.value)"
+        (updateFilterIntensity)="updateFilterIntensity($event.id, $event.value)"
+      >
+      </app-applied-filters-list>
+
+      <!-- Background Audio Tracks -->
+      <app-background-audio-panel
+        [lang]="lang()"
+        [translations]="translations()"
+        [audioTracks]="audioTracks()"
+        [playingTrackId]="playingTrackId()"
+        [isolatedPreviewTime]="isolatedPreviewTime()"
+        (audioSelected)="onAudioSelected($event)"
+        (removeTrack)="removeAudioTrack($event)"
+        (trackVolumeChanged)="setTrackVolume($event.id, $event.volume)"
+        (trackTrimStartChanged)="setTrackTrimStart($event.id, $event.value)"
+        (trackTrimEndChanged)="setTrackTrimEnd($event.id, $event.value)"
+        (previewSpecificTrack)="previewSpecificTrack($event)"
+        (audioTracksReordered)="reorderAudioTracks($event)"
+      >
+      </app-background-audio-panel>
+
+    </div>
+
+    <!-- Settings Sidebar -->
+    <div class="col-span-1 lg:col-span-3 flex flex-col gap-6">
+      <!-- Zoom & Focus Areas in Right Column Sidebar -->
+      <app-zoom-regions-list
+        [zoomRegions]="zoomRegions()"
+        [activeZoomId]="activeZoomId()"
+        [videoDuration]="videoDuration()"
+        [lang]="lang()"
+        (activeZoomIdSet)="activeZoomId.set($event)"
+        (seekTo)="seekTo($event)"
+        (addZoomRegion)="addZoomRegion()"
+        (deleteZoomRegion)="deleteZoomRegion($event)"
+        (updateZoomStartTime)="updateZoomStartTime($event.id, $event.value)"
+        (updateZoomDuration)="updateZoomDuration($event.id, $event.value)"
+        (updateZoomScale)="updateZoomScale($event.id, $event.value)"
+        (updateZoomPanX)="updateZoomPanX($event.id, $event.value)"
+        (updateZoomPanY)="updateZoomPanY($event.id, $event.value)"
+        (preview)="previewZoomRegion($event)"
+      >
+      </app-zoom-regions-list>
+
+      <div
+        class="p-4 rounded-2xl bg-neutral-900 border border-white/5 flex flex-col gap-6"
+      >
+        <h3 class="text-lg font-medium flex items-center gap-2">
+          <mat-icon class="text-red-500">tune</mat-icon>
+          {{ translations().editorSettings }}
+        </h3>
+
+        <!-- Extra Assets -->
+        <app-watermark-panel
+          [translations]="translations()"
+          [(logoFile)]="logoFile"
+          [(logoPreviewUrl)]="logoPreviewUrl"
+          [(logoPosition)]="logoPosition"
+          [(logoOpacity)]="logoOpacity"
+          [(logoSize)]="logoSize"
+        />
+
+        <!-- Video Filters Section -->
+        <app-video-filters
+          [lang]="lang()"
+          [translations]="translations()"
+          (filterSelected)="addAppliedFilter($event)"
+        />
+      </div>
+
+      @if (isProcessing()) {
+      <!-- Global disabled overlay -->
+      <div class="fixed inset-0 z-50 cursor-wait"></div>
+      }
+
+      <!-- Export Panel -->
+      <app-export-panel
+        class="block"
+        [class.relative]="isProcessing()"
+        [class.z-[60]]="isProcessing()"
+        [class.pointer-events-none]="false"
+        [lang]="lang()"
+        [translations]="translations()"
+        [isLoaded]="isLoaded()"
+        [isProcessing]="isProcessing()"
+        [progress]="progress()"
+        [outputUrl]="outputUrl()"
+        [isGifDisabled]="isGifDisabled()"
+        [volume]="volume()"
+        [outputFormat]="outputFormat()"
+        [audioBitrate]="audioBitrate()"
+        [videoBitrate]="videoBitrate()"
+        [transitionDuration]="transitionDuration()"
+        (volumeChanged)="setVideoVolume($event)"
+        (outputFormatChanged)="outputFormat.set($event)"
+        (audioBitrateChanged)="audioBitrate.set($event)"
+        (videoBitrateChanged)="videoBitrate.set($event)"
+        (transitionDurationChanged)="transitionDuration.set($event)"
+        (exportVideo)="exportVideo()"
+      />
+    </div>
+    }
+  </main>
+
+  <!-- Footer -->
+  <app-footer></app-footer>
+</div>
